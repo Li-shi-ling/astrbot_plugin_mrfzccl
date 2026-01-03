@@ -53,10 +53,6 @@ class Mrfzccl(Star):
             if not os.path.exists(abs_data_path):
                 logger.error(f"[Mrfzccl] 数据文件不存在: {abs_data_path}")
                 return
-            # 限制数据文件必须在插件数据目录内
-            if not abs_data_path.startswith(self.data_dir):
-                logger.error(f"[Mrfzccl] 数据文件必须在插件数据目录内: {self.data_dir}")
-                return
             with open(abs_data_path, "r", encoding="utf-8") as f:
                 self.data = json.load(f)
             if not isinstance(self.data, dict):
