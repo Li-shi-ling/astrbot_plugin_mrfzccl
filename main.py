@@ -3,6 +3,7 @@ from astrbot.api.star import Context, Star, register
 from typing import Optional, Dict, Any, Tuple, List
 import astrbot.api.message_components as Comp
 from astrbot.api import AstrBotConfig, logger
+from astrbot.api.star import StarTools
 from difflib import SequenceMatcher
 from io import BytesIO
 from PIL import Image
@@ -21,8 +22,12 @@ class Mrfzccl(Star):
         self.player: Dict[str, Dict[str, Any]] = {}
         self.is_load = False
         # 设置默认配置
-        self.target_size = self.Config.get("target_size", 512)
+        self.target_size = self.Config.get("target_size", 128)
         data_path = self.Config.get("mrfz_data_path", "")
+        # 存放临时文件的数据文件夹
+        self.data_dir = str(StarTools.get_data_dir())
+        # 临时文件目录
+        self.temp_path = os.path.join(self.data_dir, "temp")
         if not data_path:
             logger.error("[Mrfzccl] 未配置数据文件路径")
             return
@@ -140,7 +145,7 @@ class Mrfzccl(Star):
     async def fc_init(self, user_id: str) -> Optional[Image.Image]:
         """初始化游戏"""
         if self.has_active_game(user_id):
-            return None
+            return "already_exists"
         try:
             # 提取题目
             question = await self.extract_questions()
