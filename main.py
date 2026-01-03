@@ -1,67 +1,99 @@
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
+from typing import Optional, Dict, Any, Tuple, List
 import astrbot.api.message_components as Comp
 from astrbot.api import AstrBotConfig, logger
-from astrbot.api.star import StarTools
-import PIL
-import json
-from PIL import Image
-import requests
+from difflib import SequenceMatcher
 from io import BytesIO
+from PIL import Image
+import traceback
+import aiohttp
 import random
+import json
 import os
 import re
-from difflib import SequenceMatcher
-import aiohttp
 
 @register("mrfzccl", "Lishining", "你知道的,我一直是明日方舟高手", "1.0.0")
 class Mrfzccl(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
         self.Config = config
-        self.player = {}
+        self.player: Dict[str, Dict[str, Any]] = {}
         self.is_load = False
-        try:
-            with open(self._get_absolute_path(self.Config.get("mrfz_data_path", "")),"r") as f:
-                self.data = json.loads(f.read())
-            self.is_load = True
-        except Exception as e:
-            logger.error(f"[Mrfzccl] __init__ 加载数据文件错误,e:{e}", exc_info=True)
-            self.is_load = False
+        # 设置默认配置
         self.target_size = self.Config.get("target_size", 512)
-        self.data_dir = str(StarTools.get_data_dir())
-        self.temp_path = os.path.join(self.data_dir, "temp")
+        data_path = self.Config.get("mrfz_data_path", "")
+        if not data_path:
+            logger.error("[Mrfzccl] 未配置数据文件路径")
+            return
+        try:
+            abs_data_path = self._get_absolute_path(data_path)
+            logger.info(f"[Mrfzccl] 尝试加载数据文件: {abs_data_path}")
+            if not os.path.exists(abs_data_path):
+                logger.error(f"[Mrfzccl] 数据文件不存在: {abs_data_path}")
+                return
+            with open(abs_data_path, "r", encoding="utf-8") as f:
+                self.data = json.load(f)
+            if not isinstance(self.data, dict):
+                logger.error("[Mrfzccl] 数据文件格式错误: 应为字典类型")
+                return
+            self.is_load = True
+            logger.info(f"[Mrfzccl] 数据加载成功，共加载 {len(self.data)} 个角色")
+        except json.JSONDecodeError as e:
+            logger.error(f"[Mrfzccl] JSON解析错误: {e}")
+        except FileNotFoundError as e:
+            logger.error(f"[Mrfzccl] 文件未找到: {e}")
+        except PermissionError as e:
+            logger.error(f"[Mrfzccl] 权限错误: {e}")
+        except Exception as e:
+            logger.error(f"[Mrfzccl] 加载数据文件时发生未知错误: {e}")
+            logger.error(traceback.format_exc())
 
     @filter.command("fc")
     async def fc(self, event: AstrMessageEvent):
         if not self.is_load:
             yield event.plain_result("数据加载失败,请检查数据加载路径和后台日志")
             return
-        user_id = event.get_group_id()
-        if user_id is None:
-            user_id = event.get_sender_id()
-        code = await self.fc_init(user_id)
-        if code == 0:
-            yield event.plain_result("图片获取失败,请重试")
-            return
-        elif code == 2:
-            yield event.plain_result("已经初始化,请不要重复操作")
-            return
-        yield event.chain_result([Comp.Plain("干员立绘,请使用/fcc [干员名称] 进行猜测"), Comp.Image.fromBytes(code.tobytes())])
+        user_id = str(event.get_group_id() or event.get_sender_id())
+        try:
+            result = await self.fc_init(user_id)
+            if result == "already_exists":
+                yield event.plain_result("已经初始化,请不要重复操作")
+            elif result is None:
+                yield event.plain_result("图片获取失败,请重试")
+            else:
+                yield event.chain_result([
+                    Comp.Plain("干员立绘,请使用/fcc [干员名称] 进行猜测"),
+                    Comp.Image.fromBytes(result.tobytes())
+                ])
+        except Exception as e:
+            logger.error(f"[fc] 命令执行失败: {e}")
+            logger.error(traceback.format_exc())
+            yield event.plain_result("游戏初始化失败，请稍后重试")
 
     @filter.command("fcc")
     async def fcc(self, event: AstrMessageEvent):
-        user_id = event.get_group_id()
+        user_id = str(event.get_group_id() or event.get_sender_id())
         if not self.has_active_game(user_id):
             yield event.plain_result("没有初始化房间,请使用/fc")
             return
-        if SequenceMatcher(None, self.player[user_id]["name"], self.extract_after_keyword(event.message_str, "fcc")).ratio() > 0.5:
+        guess_text = self.extract_and_sanitize_input(event.message_str, "fcc")
+        if not guess_text:
+            yield event.chain_result([
+                Comp.At(qq=event.get_sender_id()),
+                Comp.Plain("请输入要猜测的干员名称")
+            ])
+            return
+        correct_name = self.player[user_id]["name"]
+        similarity = SequenceMatcher(None, correct_name, guess_text).ratio()
+        threshold = 0.5
+        if similarity > threshold:
             chain = [
                 Comp.At(qq=event.get_sender_id()),
-                Comp.Plain(f"回答正确!答案为:{self.player[user_id]['name']}")
+                Comp.Plain(f"回答正确! 答案为: {correct_name}")
             ]
             yield event.chain_result(chain)
-            self.destroy(user_id)
+            self.end_game(user_id)
         else:
             chain = [
                 Comp.At(qq=event.get_sender_id()),
@@ -71,17 +103,18 @@ class Mrfzccl(Star):
 
     @filter.command("fce")
     async def fce(self, event: AstrMessageEvent):
-        user_id = event.get_group_id()
-        if user_id is None:
-            user_id = event.get_sender_id()
+        """强制结束游戏"""
+        user_id = str(event.get_group_id() or event.get_sender_id())
         if not self.has_active_game(user_id):
             yield event.plain_result("没有初始化房间,请使用/fc")
             return
-        yield event.plain_result(f"游戏已结束,答案为:{self.player[user_id]['name']}")
-        self.destroy(user_id)
+        answer = self.player[user_id]["name"]
+        yield event.plain_result(f"游戏已结束,答案为: {answer}")
+        self.end_game(user_id)
 
     @filter.command("fch")
     async def fch(self, event: AstrMessageEvent):
+        """显示帮助"""
         help_text = """fc 插件使用说明
         1. 开始游戏
         命令：/fc
@@ -95,225 +128,234 @@ class Mrfzccl(Star):
         """
         yield event.plain_result(help_text)
 
-    # 注销游戏
-    def destroy(self, user_id):
+    # 游戏管理方法
+    def end_game(self, user_id: str) -> None:
         self.player.pop(user_id, None)
 
-    # 检测玩家是否存在
-    def has_active_game(self, user_id):
+    def has_active_game(self, user_id: str) -> bool:
+        """检查用户是否有活跃游戏"""
         return user_id in self.player
 
     # 初始化题目
-    async def fc_init(self, player_id):
-        if self.player.get(player_id, None):
-            self.player[player_id] = await self.extract_questions()
-            try:
-                image = await self.get_image_from_url(self.player[player_id]["url"])
-            except Exception as e:
-                logger.error(f"[fc_init] 获取图片失败,e:{e}", exc_info=True)
-                self.player.pop(player_id, None)
-                return 0
-        else:
-            return 2
-        result, revealed_lines = self.mask_image_with_random_blocks(image, block_count=5)
-        return self.resize_by_scale_(result, self.target_size)
+    async def fc_init(self, user_id: str) -> Optional[Image.Image]:
+        """初始化游戏"""
+        if self.has_active_game(user_id):
+            return None
+        try:
+            # 提取题目
+            question = await self.extract_questions()
+            if not question:
+                logger.error(f"[fc_init] 提取题目失败")
+                return None
+            # 获取图片
+            image = await self.get_image_from_url(question["url"])
+            if not image:
+                logger.error(f"[fc_init] 获取图片失败")
+                return None
+            # 存储游戏状态
+            self.player[user_id] = question
+            # 处理图片
+            result, _ = self.mask_image_with_random_blocks(
+                image,
+                block_count=5
+            )
+            # 调整大小
+            resized = self.resize_to_target(result, self.target_size)
+            return resized
+        except Exception as e:
+            logger.error(f"[fc_init] 初始化失败: {e}")
+            logger.error(traceback.format_exc())
+            self.end_game(user_id)
+            return None
 
     # 获取明日方舟猜猜乐题目
-    async def extract_questions(self):
-        names = list(self.data.keys())
-        random_name = random.choice(names)
-        urls = self.data[random_name]["original_url"]
-        random_url = random.choice(urls)
-        return {"name":random_name,"url":random_url}
-
-    # 将路径转换为绝对路径
-    def _get_absolute_path(self, path):
-        if not path:
-            return ""
-        return os.path.abspath(path)
-
-    # 从url获取image
-    async def get_image_from_url(self, url):
+    async def extract_questions(self) -> Optional[Dict[str, Any]]:
+        """随机选择题目"""
         try:
+            if not self.data:
+                logger.error("[extract_questions] 数据未加载")
+                return None
+            names = list(self.data.keys())
+            if not names:
+                logger.error("[extract_questions] 数据为空")
+                return None
+            random_name = random.choice(names)
+            character_data = self.data[random_name]
+            if not isinstance(character_data, dict):
+                logger.error(f"[extract_questions] 角色数据格式错误: {random_name}")
+                return None
+            urls = character_data.get("original_url", [])
+            if not urls or not isinstance(urls, list):
+                logger.error(f"[extract_questions] 角色URL数据错误: {random_name}")
+                return None
+            random_url = random.choice(urls)
+            if not isinstance(random_url, str) or not random_url.startswith(("http://", "https://")):
+                logger.error(f"[extract_questions] 无效的URL: {random_url}")
+                return None
+            return {
+                "name": random_name,
+                "url": random_url
+            }
+        except Exception as e:
+            logger.error(f"[extract_questions] 提取题目失败: {e}")
+            logger.error(traceback.format_exc())
+            return None
+
+    # 路径处理
+    def _get_absolute_path(self, path: str) -> str:
+        if not path:
+            raise ValueError("路径不能为空")
+        abs_path = os.path.abspath(path)
+        return abs_path
+
+    # 异步获取图片
+    async def get_image_from_url(self, url: str, timeout: int = 10) -> Optional[Image.Image]:
+        """从URL异步获取图片"""
+        try:
+            # 验证URL
+            if not url.startswith(("http://", "https://")):
+                raise ValueError(f"无效的URL协议: {url}")
             async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                timeout_obj = aiohttp.ClientTimeout(total=timeout)
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                }
+                async with session.get(
+                        url,
+                        timeout=timeout_obj,
+                        headers=headers,
+                        ssl=False  # 注意：生产环境可能需要调整
+                ) as response:
                     if response.status != 200:
                         raise Exception(f"HTTP {response.status}: {response.reason}")
                     content = await response.read()
-                    if not content:
+                    if len(content) == 0:
                         raise Exception("下载的图片数据为空")
+                    if len(content) > 10 * 1024 * 1024:  # 10MB限制
+                        raise Exception("图片文件过大")
+                    # 加载图片
                     image = Image.open(BytesIO(content))
+                    # 验证图片格式
+                    if image.format not in ['JPEG', 'PNG', 'GIF', 'WEBP', 'BMP']:
+                        raise Exception(f"不支持的图片格式: {image.format}")
+                    # 确保图片加载完成
                     image.load()
+                    # 检查图片尺寸
+                    width, height = image.size
+                    if width > 5000 or height > 5000:
+                        raise Exception(f"图片尺寸过大: {width}x{height}")
                     return image
         except aiohttp.ClientError as e:
-            raise Exception(f"网络请求失败: {str(e)}")
+            logger.error(f"[get_image_from_url] 网络请求失败: {e}")
+            raise
         except Exception as e:
-            raise Exception(f"处理图片时出错: {str(e)}")
+            logger.error(f"[get_image_from_url] 处理图片时出错: {e}")
+            raise
 
-    # 对图片进行随机的行显示
-    def mask_image_with_dynamic_thickness(
-            self,
-            image,
-            mask_color=(0, 0, 0),
-            line_count=4,
-            line_thickness_percent=3,
-            min_gap_percent=5
-    ):
-        """
-        Args:
-            image: PIL Image对象
-            mask_color: 遮挡颜色
-            line_count: 要透明的行数
-            line_thickness_percent: 行厚度占图片高度的百分比
-            min_gap_percent: 最小间隔占图片高度的百分比
+    # 输入处理
+    def extract_and_sanitize_input(self, text: str, keyword: str) -> str:
+        """提取并清理用户输入"""
+        if not text or not keyword:
+            return ""
+        pattern = rf'{re.escape(keyword)}\s*(.*)'
+        match = re.search(pattern, text)
+        if not match:
+            return ""
+        user_input = match.group(1).strip()
+        # 清理输入：移除特殊字符，只保留中文、英文、数字和空格
+        cleaned = re.sub(r'[^\u4e00-\u9fa5a-zA-Z0-9\s]', '', user_input)
+        # 限制长度
+        if len(cleaned) > 50:
+            cleaned = cleaned[:50]
+        return cleaned
 
-        Returns:
-            PIL.Image.Image: 处理后的图片
-        """
-        width, height = image.size
-        line_thickness = max(10, int(height * line_thickness_percent / 100))
-        min_gap = max(20, int(height * min_gap_percent / 100))
-        if image.mode != 'RGBA':
-            original_rgba = image.convert('RGBA')
-        else:
-            original_rgba = image.copy()
-        mask_opacity = 255
-        mask_layer = Image.new('RGBA', (width, height), mask_color + (mask_opacity,))
-        revealed_lines = []
-        min_center = line_thickness
-        max_center = height - line_thickness
-        if max_center <= min_center:
-            min_center = 0
-            max_center = height
-        possible_centers = list(range(min_center, max_center + 1))
-        for attempt in range(100):
-            if len(revealed_lines) >= line_count or not possible_centers:
-                break
-            center = random.choice(possible_centers)
-            top = max(0, center - line_thickness // 2)
-            bottom = min(height, center + line_thickness // 2)
-            conflict = False
-            for existing_center, _, _ in revealed_lines:
-                if abs(center - existing_center) < min_gap:
-                    conflict = True
-                    break
-            if not conflict:
-                revealed_lines.append((center, top, bottom))
-                possible_centers = [
-                    pos for pos in possible_centers
-                    if abs(pos - center) >= min_gap
-                ]
-        if not revealed_lines:
-            logger.error("警告：无法创建透明行，图片可能太小")
-        mask_pixels = mask_layer.load()
-        for center, top, bottom in revealed_lines:
-            for y in range(top, bottom):
-                for x in range(width):
-                    r, g, b, a = mask_pixels[x, y]
-                    mask_pixels[x, y] = (r, g, b, 0)
-        result = Image.alpha_composite(original_rgba, mask_layer)
-        return result, revealed_lines
-
-    # 对图片进行随机的方块显示
+    # 图片处理方法
     def mask_image_with_random_blocks(
             self,
-            image,
-            mask_color=(0, 0, 0),
-            block_count=5,
-            min_width_percent=10, max_width_percent=20,
-            min_height_percent=10, max_height_percent=20,
-            min_gap_percent=2,
-            avoid_edges=True
-    ):
+            image: Image.Image,
+            mask_color: Tuple[int, int, int] = (0, 0, 0),
+            block_count: int = 5,
+            min_width_percent: int = 10,
+            max_width_percent: int = 20,
+            min_height_percent: int = 10,
+            max_height_percent: int = 20,
+            min_gap_percent: int = 2,
+            avoid_edges: bool = True
+    ) -> Tuple[Image.Image, List[Tuple[int, int, int, int]]]:
         """
         在图片上生成随机透明小方块
-
-        Args:
-            image: PIL Image对象
-            mask_color: 遮挡颜色
-            block_count: 要生成的透明方块数量
-            min_width_percent: 最小方块宽度占图片宽度的百分比
-            max_width_percent: 最大方块宽度占图片宽度的百分比
-            min_height_percent: 最小方块高度占图片高度的百分比
-            max_height_percent: 最大方块高度占图片高度的百分比
-            min_gap_percent: 最小间隔占图片尺寸的百分比
-            avoid_edges: 是否避免方块紧贴图片边缘
-
-        Returns:
-            PIL.Image.Image: 处理后的图片
-            list: 生成的方块位置信息 [(x1, y1, x2, y2), ...]
         """
+        # 参数验证
+        if block_count < 1 or block_count > 20:
+            block_count = 5
+        if min_width_percent < 1 or min_width_percent > 50:
+            min_width_percent = 10
+        if max_width_percent < min_width_percent or max_width_percent > 50:
+            max_width_percent = 20
+        if min_height_percent < 1 or min_height_percent > 50:
+            min_height_percent = 10
+        if max_height_percent < min_height_percent or max_height_percent > 50:
+            max_height_percent = 20
         width, height = image.size
+        # 计算实际像素值
         min_width = max(5, int(width * min_width_percent / 100))
         max_width = max(min_width, int(width * max_width_percent / 100))
         min_height = max(5, int(height * min_height_percent / 100))
         max_height = max(min_height, int(height * max_height_percent / 100))
         min_gap = int(min(width, height) * min_gap_percent / 100)
+        # 转换图片模式
         if image.mode != 'RGBA':
             original_rgba = image.convert('RGBA')
         else:
             original_rgba = image.copy()
-        mask_opacity = 255
-        mask_layer = Image.new('RGBA', (width, height), mask_color + (mask_opacity,))
+        mask_layer = Image.new('RGBA', (width, height), mask_color + (255,))
         blocks = []
-        mask_pixels = mask_layer.load()
         edge_margin = min_gap if avoid_edges else 0
         for i in range(block_count):
-            for attempt in range(100):
+            for attempt in range(100):  # 最多尝试100次
                 block_width = random.randint(min_width, max_width)
                 block_height = random.randint(min_height, max_height)
                 max_x = width - block_width - edge_margin
                 max_y = height - block_height - edge_margin
                 if max_x <= edge_margin or max_y <= edge_margin:
-                    logger.error(f"警告：图片太小，无法生成方块 {i + 1}")
+                    logger.warning(f"图片太小，无法生成方块 {i + 1}")
                     break
                 x = random.randint(edge_margin, max_x)
                 y = random.randint(edge_margin, max_y)
                 x1, y1 = x, y
                 x2, y2 = x + block_width, y + block_height
+                # 检查是否与现有方块冲突
                 conflict = False
                 for (bx1, by1, bx2, by2) in blocks:
                     if not (x2 + min_gap < bx1 or x1 > bx2 + min_gap or
                             y2 + min_gap < by1 or y1 > by2 + min_gap):
                         conflict = True
                         break
-
                 if not conflict:
                     blocks.append((x1, y1, x2, y2))
+                    # 创建透明区域
                     for block_y in range(y1, min(y2, height)):
                         for block_x in range(x1, min(x2, width)):
-                            r, g, b, a = mask_pixels[block_x, block_y]
-                            mask_pixels[block_x, block_y] = (r, g, b, 0)
+                            mask_layer.putpixel((block_x, block_y), (*mask_color, 0))
                     break
             else:
-                logger.error(f"警告：无法生成方块 {i + 1}，可能空间不足")
-        logger.info(f"成功创建 {len(blocks)} 个透明方块")
-        if not blocks:
-            logger.error("警告：无法创建任何透明方块")
+                logger.warning(f"无法生成方块 {i + 1}，可能空间不足")
         result = Image.alpha_composite(original_rgba, mask_layer)
         return result, blocks
 
-    # 按比例缩放图像
-    def resize_by_scale(self, image, scale_factor):
+    # 图片缩放方法
+    def resize_to_target(self, image: Image.Image, target_size: int) -> Image.Image:
+        """按比例缩放图像，保持宽高比"""
+        if target_size <= 0:
+            target_size = 800
         w, h = image.size
-        return image.resize((int(w * scale_factor), int(h * scale_factor)), Image.Resampling.LANCZOS)
-
-    # 保留长宽比，将较大边缩放到目标大小
-    def resize_by_scale_(self, image, target_size):
-        w, h = image.size
-        ratio = w / h
         if w >= h:
             new_w = target_size
-            new_h = int(target_size / ratio)
+            new_h = int(target_size * h / w)
         else:
             new_h = target_size
-            new_w = int(target_size * ratio)
+            new_w = int(target_size * w / h)
+        # 确保最小尺寸
+        new_w = max(new_w, 100)
+        new_h = max(new_h, 100)
         return image.resize((new_w, new_h), Image.Resampling.LANCZOS)
-
-    # 提取指令参数
-    def extract_after_keyword(self, text, keyword):
-        pattern = rf'{re.escape(keyword)}\s*(.*)'
-        match = re.search(pattern, text)
-        if match:
-            return match.group(1)
-        return None
