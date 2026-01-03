@@ -304,9 +304,6 @@ class Mrfzccl(Star):
     def _get_absolute_path(self, path: str) -> str:
         if not path:
             raise ValueError("路径不能为空")
-        # 如果是相对路径，则相对于插件数据目录
-        if not os.path.isabs(path):
-            return os.path.join(self.data_dir, path)
         return os.path.abspath(path)
 
     # 异步获取图片
