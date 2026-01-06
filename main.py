@@ -17,7 +17,6 @@ import time
 import os
 import re
 
-
 @register("mrfzccl", "Lishining", "你知道的,我一直是明日方舟高手", "1.0.0")
 class Mrfzccl(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
@@ -28,6 +27,11 @@ class Mrfzccl(Star):
         self.original_images: Dict[str, Image.Image] = {}  # 保存原始图片对象
         self.is_load = False
         self._shutting_down = False  # 添加关闭标志
+        self.fct_key = {
+            0 : "职业分支",
+            1 : "阵营",
+            2 : "性别",
+        }
 
         # 添加 HTTP 会话管理
         self._session: Optional[aiohttp.ClientSession] = None
@@ -170,6 +174,22 @@ class Mrfzccl(Star):
         yield event.chain_result(chain)
         yield await self.send_original_image(user_id, event)
 
+    # 获取提示
+    @filter.command("fct")
+    async def fct(self, event: AstrMessageEvent):
+        user_id = str(event.get_group_id() or event.get_sender_id())
+        if not self.has_active_game(user_id):
+            yield event.plain_result("没有初始化房间,请使用/fc")
+            return
+        if self.player[user_id]["fctn"] <= 2:
+            yield event.plain_result(
+                f"这个干员的{self.fct_key[self.player[user_id]['fctn']]}为:{self.data.get(self.player[user_id]['name'],{}).get(self.fct_key[self.player[user_id]['fctn']],'该干员没有该属性')}"
+            )
+        else:
+            name_len = self.player[user_id]["fctn"] - 2
+            yield event.plain_result(f"这个干员的前{name_len}个字为:{self.player[user_id]['name'][:name_len]}")
+        self.player[user_id]["fctn"] += 1
+
     # 发送原始图片
     async def send_original_image(self, user_id: str, event: AstrMessageEvent):
         if user_id in self.original_images:
@@ -209,6 +229,9 @@ class Mrfzccl(Star):
             3. 强制结束游戏
             命令：/fce
             说明：结束当前进行的游戏并显示原图
+            3. 提示功能
+            命令：/fct
+            说明：获取提示
             """
         yield event.plain_result(help_text)
 
@@ -292,7 +315,8 @@ class Mrfzccl(Star):
                 return None
             return {
                 "name": random_name,
-                "url": random_url
+                "url": random_url,
+                "fctn": 0
             }
         except (KeyError, IndexError, TypeError) as e:
             logger.error(f"[extract_questions] 提取题目失败: {e}")
