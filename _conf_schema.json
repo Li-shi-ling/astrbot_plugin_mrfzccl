@@ -2,7 +2,7 @@
   "mrfz_data_path": {
     "description": "明日方舟角色数据(插件自带,可以通过修改文件来修改随机池)",
     "type": "string",
-    "default": "./data/plugins/astrbot_plugin_mrfzccl/arknights_skins_dict_all.json",
+    "default": "./data/plugins/astrbot_plugin_mrfzccl/arknights_skins_dict.json",
     "hint": "例如：/home/user/arknights_skins_dict.json"
   },
   "target_size": {
