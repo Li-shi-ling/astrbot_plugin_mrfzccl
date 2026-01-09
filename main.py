@@ -105,6 +105,7 @@ class Mrfzccl(Star):
     # 初始化游戏
     @filter.command("fc")
     async def fc(self, event: AstrMessageEvent):
+        """开始游戏 /fc"""
         if not self.is_load:
             yield event.chain_result([
                 Comp.At(qq=event.get_sender_id()),
@@ -131,6 +132,7 @@ class Mrfzccl(Star):
     # 进行猜测
     @filter.command("fcc")
     async def fcc(self, event: AstrMessageEvent):
+        """进行猜题 /fcc [干员名称]"""
         user_id = str(event.get_group_id() or event.get_sender_id())
         if not self.has_active_game(user_id):
             yield event.plain_result("没有初始化房间,请使用/fc")
@@ -162,6 +164,7 @@ class Mrfzccl(Star):
     # 强制结束游戏
     @filter.command("fce")
     async def fce(self, event: AstrMessageEvent):
+        """强置结束游戏 /fce"""
         user_id = str(event.get_group_id() or event.get_sender_id())
         if not self.has_active_game(user_id):
             yield event.plain_result("没有初始化房间,请使用/fc")
@@ -177,6 +180,7 @@ class Mrfzccl(Star):
     # 获取提示
     @filter.command("fct")
     async def fct(self, event: AstrMessageEvent):
+        """获取提示 /fct"""
         user_id = str(event.get_group_id() or event.get_sender_id())
         if not self.has_active_game(user_id):
             yield event.plain_result("没有初始化房间,请使用/fc")
@@ -219,6 +223,7 @@ class Mrfzccl(Star):
     # 显示帮助
     @filter.command("fch")
     async def fch(self, event: AstrMessageEvent):
+        """获取帮助文档 /fch"""
         help_text = """fc 插件使用说明
             1. 开始游戏
             命令：/fc
