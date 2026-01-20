@@ -7,6 +7,7 @@ from difflib import SequenceMatcher
 from urllib.parse import urlparse
 from io import BytesIO
 from PIL import Image
+import numpy as np
 import traceback
 import asyncio
 import aiohttp
@@ -64,7 +65,7 @@ class Mrfzccl(Star):
             logger.error(traceback.format_exc())
 
     # 插件卸载时的清理钩子
-    async def on_unload(self):
+    async def terminate(self):
         self._shutting_down = True
         if self._session and not self._session.closed:
             await self._session.close()
@@ -376,7 +377,6 @@ class Mrfzccl(Star):
             cleaned = cleaned[:50]
         return cleaned
 
-    # 在图片上生成随机透明小方块
     def mask_image_with_random_blocks(
             self,
             image: Image.Image,
@@ -389,57 +389,63 @@ class Mrfzccl(Star):
             min_gap_percent: int = 2,
             avoid_edges: bool = True
     ) -> Tuple[Image.Image, List[Tuple[int, int, int, int]]]:
-        if block_count < 1 or block_count > 20:
-            block_count = 5
-        if min_width_percent < 1 or min_width_percent > 50:
-            min_width_percent = 10
-        if max_width_percent < min_width_percent or max_width_percent > 50:
-            max_width_percent = 20
-        if min_height_percent < 1 or min_height_percent > 50:
-            min_height_percent = 10
-        if max_height_percent < min_height_percent or max_height_percent > 50:
-            max_height_percent = 20
-        width, height = image.size
+        """
+        高性能遮罩图片，只露出几个小方块，保持原始游戏逻辑
+        """
+        if image.mode != 'RGBA':
+            original_rgba = image.convert('RGBA')
+        else:
+            original_rgba = image.copy()
+
+        width, height = original_rgba.size
+        arr = np.array(original_rgba)
+
+        # 创建遮罩层，填充 mask_color 并全覆盖
+        mask_layer = np.zeros_like(arr)
+        mask_layer[..., 0] = mask_color[0]
+        mask_layer[..., 1] = mask_color[1]
+        mask_layer[..., 2] = mask_color[2]
+        mask_layer[..., 3] = 255  # 全不透明
+
         min_width = max(5, int(width * min_width_percent / 100))
         max_width = max(min_width, int(width * max_width_percent / 100))
         min_height = max(5, int(height * min_height_percent / 100))
         max_height = max(min_height, int(height * max_height_percent / 100))
         min_gap = int(min(width, height) * min_gap_percent / 100)
-        if image.mode != 'RGBA':
-            original_rgba = image.convert('RGBA')
-        else:
-            original_rgba = image.copy()
-        mask_layer = Image.new('RGBA', (width, height), mask_color + (255,))
-        blocks = []
         edge_margin = min_gap if avoid_edges else 0
-        for i in range(block_count):
+
+        blocks = []
+
+        for _ in range(block_count):
             for attempt in range(100):
-                block_width = random.randint(min_width, max_width)
-                block_height = random.randint(min_height, max_height)
-                max_x = width - block_width - edge_margin
-                max_y = height - block_height - edge_margin
+                w = random.randint(min_width, max_width)
+                h = random.randint(min_height, max_height)
+                max_x = width - w - edge_margin
+                max_y = height - h - edge_margin
                 if max_x <= edge_margin or max_y <= edge_margin:
-                    logger.warning(f"图片太小，无法生成方块 {i + 1}")
                     break
-                x = random.randint(edge_margin, max_x)
-                y = random.randint(edge_margin, max_y)
-                x1, y1 = x, y
-                x2, y2 = x + block_width, y + block_height
+                x1 = random.randint(edge_margin, max_x)
+                y1 = random.randint(edge_margin, max_y)
+                x2, y2 = x1 + w, y1 + h
+
+                # 检查是否冲突
                 conflict = False
-                for (bx1, by1, bx2, by2) in blocks:
+                for bx1, by1, bx2, by2 in blocks:
                     if not (x2 + min_gap < bx1 or x1 > bx2 + min_gap or
                             y2 + min_gap < by1 or y1 > by2 + min_gap):
                         conflict = True
                         break
+
                 if not conflict:
                     blocks.append((x1, y1, x2, y2))
-                    for block_y in range(y1, min(y2, height)):
-                        for block_x in range(x1, min(x2, width)):
-                            mask_layer.putpixel((block_x, block_y), (*mask_color, 0))
+                    mask_layer[y1:y2, x1:x2, 3] = 0  # 方块区域透明
                     break
-            else:
-                logger.warning(f"无法生成方块 {i + 1}，可能空间不足")
-        result = Image.alpha_composite(original_rgba, mask_layer)
+
+        # alpha 合成：遮罩层覆盖原图
+        alpha = mask_layer[..., 3:4] / 255.0
+        result_arr = arr * (1 - alpha) + mask_layer * alpha
+        result_arr = result_arr.astype(np.uint8)
+        result = Image.fromarray(result_arr, 'RGBA')
         return result, blocks
 
     # 按比例缩放图像，保持宽高比
