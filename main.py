@@ -1,5 +1,5 @@
 from astrbot.api.event import filter, AstrMessageEvent
-from astrbot.api.star import Context, Star, StarTools, register
+from astrbot.api.star import Context, Star, register
 from typing import Optional, Dict, Any, Tuple, List
 import astrbot.api.message_components as Comp
 from astrbot.api import AstrBotConfig, logger
@@ -8,12 +8,10 @@ from urllib.parse import urlparse
 from io import BytesIO
 from PIL import Image
 import traceback
-import tempfile
 import asyncio
 import aiohttp
 import random
 import json
-import time
 import os
 import re
 
@@ -23,7 +21,6 @@ class Mrfzccl(Star):
         super().__init__(context)
         self.Config = config
         self.player: Dict[str, Dict[str, Any]] = {}
-        self.temp_files: Dict[str, str] = {}  # user_id -> temp_file_path (遮罩图)
         self.original_images: Dict[str, Image.Image] = {}  # 保存原始图片对象
         self.is_load = False
         self._shutting_down = False  # 添加关闭标志
@@ -36,19 +33,6 @@ class Mrfzccl(Star):
         # 添加 HTTP 会话管理
         self._session: Optional[aiohttp.ClientSession] = None
         self._executor = None  # 线程池执行器
-
-        # 存放临时文件的数据文件夹
-        self.data_dir = str(StarTools.get_data_dir())
-        # 临时文件目录
-        self.temp_path = os.path.join(self.data_dir, "temp")
-
-        # 确保临时目录存在
-        try:
-            os.makedirs(self.temp_path, exist_ok=True)
-            logger.info(f"[Mrfzccl] 临时文件目录: {self.temp_path}")
-        except OSError as e:
-            logger.error(f"[Mrfzccl] 创建临时目录失败: {e}")
-            self.temp_path = tempfile.gettempdir()  # 回退到系统临时目录
 
         # 设置默认配置
         self.target_size = self.Config.get("target_size", 128)
@@ -85,7 +69,6 @@ class Mrfzccl(Star):
         if self._session and not self._session.closed:
             await self._session.close()
             logger.debug("[Mrfzccl] HTTP会话已关闭")
-        await self.cleanup_all_temp_files()
 
     # 获取或创建 HTTP 会话
     async def _get_session(self) -> aiohttp.ClientSession:
@@ -122,7 +105,7 @@ class Mrfzccl(Star):
             else:
                 yield event.chain_result([
                     Comp.Plain("干员立绘,请使用/fcc [干员名称] 进行猜测"),
-                    Comp.Image.fromFileSystem(result)
+                    Comp.Image.fromBytes(result)
                 ])
         except Exception as e:
             logger.error(f"[fc] 命令执行失败: {e}")
@@ -206,19 +189,19 @@ class Mrfzccl(Star):
                     original_image,
                     self.target_size
                 )
-                original_temp_path = await self.save_original_image_to_temp(resized_original, user_id)
-                return event.chain_result([
+                img_bytes = self.pil_image_to_bytes(resized_original)
+                yield event.chain_result([
                     Comp.Plain("正确答案的完整立绘:"),
-                    Comp.Image.fromFileSystem(original_temp_path)
+                    Comp.Image.fromBytes(img_bytes)
                 ])
             except Exception as e:
                 logger.error(f"[send_original_image] 发送原始图片失败: {e}")
-                return event.plain_result("发送正确答案图片失败")
+                yield event.plain_result("发送正确答案图片失败")
             finally:
                 self.end_game(user_id)
         else:
             logger.warning(f"[send_original_image] 用户 {user_id} 没有原始图片")
-            return event.plain_result("无法获取正确答案图片")
+            yield event.plain_result("无法获取正确答案图片")
 
     # 显示帮助
     @filter.command("fch")
@@ -242,17 +225,15 @@ class Mrfzccl(Star):
 
     # 结束游戏并清理资源
     def end_game(self, user_id: str) -> None:
-        asyncio.create_task(self.cleanup_user_temp_files(user_id))
-        asyncio.create_task(self.cleanup_original_image(user_id))
-        asyncio.create_task(self.periodic_cleanup_old_files())
         self.player.pop(user_id, None)
 
     # 检查用户是否有活跃游戏
     def has_active_game(self, user_id: str) -> bool:
-        return user_id in self.player and self.player[user_id].get("status") != "loading"
+        data = self.player.get(user_id)
+        return bool(data and data.get("status") == "active")
 
     # 初始化游戏，返回临时文件路径
-    async def fc_init(self, user_id: str) -> Optional[str]:
+    async def fc_init(self, user_id: str) -> bytes | str | None:
         if self.has_active_game(user_id):
             return "already_exists"
         self.player[user_id] = {"status": "loading"}
@@ -283,14 +264,11 @@ class Mrfzccl(Star):
                 result,
                 self.target_size
             )
-            temp_path = await self.save_image_to_temp(resized, user_id)
-            await self.periodic_cleanup_old_files()
-            return temp_path
+            img_bytes = self.pil_image_to_bytes(resized)
+            return img_bytes
         except Exception as e:
             logger.error(f"[fc_init] 初始化失败: {e}")
             logger.error(traceback.format_exc())
-            await self.cleanup_user_temp_files(user_id)
-            await self.cleanup_original_image(user_id)
             if user_id in self.player:
                 self.player.pop(user_id, None)
             return None
@@ -479,103 +457,7 @@ class Mrfzccl(Star):
         new_h = max(new_h, 100)
         return image.resize((new_w, new_h), Image.Resampling.LANCZOS)
 
-    # 将 PIL Image（遮罩图）保存到临时文件
-    async def save_image_to_temp(self, image: Image.Image, user_id: str) -> str:
-        try:
-            os.makedirs(self.temp_path, exist_ok=True)
-            timestamp = int(time.time() * 1000)
-            import hashlib
-            filename_hash = hashlib.md5(f"{user_id}_{timestamp}_masked".encode()).hexdigest()[:8]
-            temp_filename = f"fc_masked_{user_id}_{filename_hash}.png"
-            temp_path = os.path.join(self.temp_path, temp_filename)
-            loop = asyncio.get_running_loop()
-            await loop.run_in_executor(
-                None,
-                self._save_image_sync,
-                image,
-                temp_path
-            )
-            self.temp_files[user_id] = temp_path
-            logger.debug(f"[save_image_to_temp] 遮罩临时文件已保存: {temp_path}")
-            return temp_path
-        except Exception as e:
-            logger.error(f"[save_image_to_temp] 保存临时文件失败: {e}")
-            raise
-
-    # 同步保存图片（在线程池中执行）
-    def _save_image_sync(self, image: Image.Image, filepath: str):
-        image.save(filepath, 'PNG', optimize=True)
-
-    # 将原始图片保存到临时文件
-    async def save_original_image_to_temp(self, image: Image.Image, user_id: str) -> str:
-        try:
-            os.makedirs(self.temp_path, exist_ok=True)
-            timestamp = int(time.time() * 1000)
-            import hashlib
-            filename_hash = hashlib.md5(f"{user_id}_{timestamp}_original".encode()).hexdigest()[:8]
-            temp_filename = f"fc_original_{user_id}_{filename_hash}.png"
-            temp_path = os.path.join(self.temp_path, temp_filename)
-            loop = asyncio.get_running_loop()
-            await loop.run_in_executor(
-                None,
-                self._save_image_sync,
-                image,
-                temp_path
-            )
-            logger.debug(f"[save_original_image_to_temp] 原始图片临时文件已保存: {temp_path}")
-            return temp_path
-        except Exception as e:
-            logger.error(f"[save_original_image_to_temp] 保存原始图片临时文件失败: {e}")
-            raise
-
-    # 清理用户的临时文件（遮罩图）
-    async def cleanup_user_temp_files(self, user_id: str):
-        if user_id in self.temp_files:
-            temp_path = self.temp_files.pop(user_id)
-            try:
-                if os.path.exists(temp_path):
-                    os.unlink(temp_path)
-                    logger.debug(f"[cleanup_user_temp_files] 清理遮罩临时文件: {temp_path}")
-            except OSError as e:
-                logger.warning(f"[cleanup_user_temp_files] 清理遮罩文件失败 {temp_path}: {e}")
-
-    # 清理内存中的原始图片
-    async def cleanup_original_image(self, user_id: str):
-        if user_id in self.original_images:
-            del self.original_images[user_id]
-            logger.debug(f"[cleanup_original_image] 清理内存中的原始图片: {user_id}")
-
-    # 清理所有临时文件
-    async def cleanup_all_temp_files(self):
-        if self._shutting_down:
-            return
-        try:
-            for user_id in list(self.temp_files.keys()):
-                await self.cleanup_user_temp_files(user_id)
-            for user_id in list(self.original_images.keys()):
-                await self.cleanup_original_image(user_id)
-            await self.cleanup_old_temp_files(max_age_hours=24)
-        except Exception as e:
-            logger.error(f"[cleanup_all_temp_files] 清理失败: {e}")
-
-    # 清理过期的临时文件
-    async def cleanup_old_temp_files(self, max_age_hours: int = 24):
-        try:
-            current_time = time.time()
-            for filename in os.listdir(self.temp_path):
-                if filename.startswith("fc_"):
-                    file_path = os.path.join(self.temp_path, filename)
-                    try:
-                        file_age = current_time - os.path.getmtime(file_path)
-                        if file_age > max_age_hours * 3600:
-                            os.unlink(file_path)
-                            logger.debug(f"[cleanup_old_temp_files] 清理过期文件: {filename}")
-                    except (OSError, FileNotFoundError) as e:
-                        logger.warning(f"[cleanup_old_temp_files] 无法处理文件 {filename}: {e}")
-        except (OSError, FileNotFoundError) as e:
-            logger.error(f"[cleanup_old_temp_files] 访问临时目录失败: {e}")
-
-    # 定期清理旧文件，概率性触发以减少开销
-    async def periodic_cleanup_old_files(self):
-        if random.random() < 0.1:
-            await self.cleanup_old_temp_files(max_age_hours=24)
+    def pil_image_to_bytes(self, image: Image.Image, format: str = "PNG") -> bytes:
+        buf = BytesIO()
+        image.save(buf, format=format, optimize=True)
+        return buf.getvalue()
