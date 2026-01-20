@@ -191,18 +191,20 @@ class Mrfzccl(Star):
                     self.target_size
                 )
                 img_bytes = self.pil_image_to_bytes(resized_original)
-                yield event.chain_result([
+                output_data = event.chain_result([
                     Comp.Plain("正确答案的完整立绘:"),
                     Comp.Image.fromBytes(img_bytes)
                 ])
+                self.end_game(user_id)
+                return output_data
             except Exception as e:
                 logger.error(f"[send_original_image] 发送原始图片失败: {e}")
-                yield event.plain_result("发送正确答案图片失败")
+                return event.plain_result("发送正确答案图片失败")
             finally:
                 self.end_game(user_id)
         else:
             logger.warning(f"[send_original_image] 用户 {user_id} 没有原始图片")
-            yield event.plain_result("无法获取正确答案图片")
+            return event.plain_result("无法获取正确答案图片")
 
     # 显示帮助
     @filter.command("fch")
