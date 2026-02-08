@@ -3,7 +3,7 @@ import asyncio
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import List
 
 from html2image import Html2Image
 from markdown_it import MarkdownIt
@@ -13,28 +13,29 @@ from .db.tables import UserQnAStats
 
 class QnAStatsRenderer:
     """
-    问答统计渲染器（生产级）
-    - 宽高完全人工计算
-    - 不依赖 html2image 的自动高度
+    问答统计渲染器（Layout + Theme 解耦版）
+    - Layout：尺寸 / 结构 / 排版
+    - Theme：颜色 / 背景 / 风格
     """
 
-    # ======================= 尺寸参数（核心） =======================
+    # ======================= 尺寸参数（Layout） =======================
 
     CARD_WIDTH = 900
 
-    # 高度相关（px）
-    BASE_HEIGHT = 220        # padding + title + timestamp
+    BASE_HEIGHT = 220
     TABLE_HEADER_HEIGHT = 52
     TABLE_ROW_HEIGHT = 44
-    SAFE_PADDING = 80        # 防止被截断
+    SAFE_PADDING = 80
 
     USER_PROFILE_HEIGHT = 900
 
     # ======================= init =======================
 
-    def __init__(self, output_dir: str = "data/quiz_images"):
+    def __init__(self, output_dir: str = "data/quiz_images", theme: str = "light"):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
+
+        self.theme = theme
 
         self.md = (
             MarkdownIt(
@@ -49,109 +50,190 @@ class QnAStatsRenderer:
             .enable("strikethrough")
         )
 
-        self.css = """
+    # ======================= CSS（核心拆分） =======================
+
+    def _layout_css(self) -> str:
+        """只管布局，不管颜色"""
+        return """
         <style>
+        html, body {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+        }
+
         body {
             font-family: -apple-system, BlinkMacSystemFont,
                          "Segoe UI", "PingFang SC",
                          "Microsoft YaHei", Arial;
-            padding: 0;
-            background: linear-gradient(135deg,#f5f7fa,#c3cfe2);
-            margin: 0;
+            overflow: hidden;
         }
 
-        .card {
-            background: #fff;
-            border-radius: 16px;
+        .page {
+            width: 100vw;
+            height: 100vh;
+            box-sizing: border-box;
             padding: 28px;
-            max-width: 860px;
-            margin: auto;
-            box-shadow: 0 12px 30px rgba(0,0,0,.12);
-            width: 100%;
-            max-width: none;
-            margin: 0;
         }
 
         h1 {
-            text-align:center;
-            border-bottom:3px solid #3498db;
-            padding-bottom:12px;
+            text-align: center;
+            padding-bottom: 12px;
+            margin-bottom: 20px;
         }
 
         table {
-            width:100%;
-            border-collapse:collapse;
-            margin:20px 0;
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
         }
 
-        th {
+        th, td {
+            padding: 14px;
+            text-align: left;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 16px;
+            margin-top: 20px;
+        }
+
+        .stat-box {
+            border-radius: 12px;
+            padding: 18px;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 26px;
+            font-weight: bold;
+        }
+
+        .accuracy-bar {
+            height: 10px;
+            border-radius: 5px;
+            overflow: hidden;
+            margin: 8px 0 20px;
+        }
+
+        .accuracy-fill {
+            height: 100%;
+        }
+
+        .timestamp {
+            margin-top: 24px;
+            text-align: center;
+            font-size: 12px;
+            padding-top: 12px;
+        }
+        </style>
+        """
+
+    def _theme_css(self) -> str:
+        """只管配色 / 风格"""
+        if self.theme == "dark":
+            return """
+            <style>
+            body {
+                background: #0f172a;
+            }
+
+            .page {
+                background: linear-gradient(135deg, #1e293b, #020617);
+                color: #e5e7eb;
+            }
+
+            h1 {
+                border-bottom: 3px solid #38bdf8;
+            }
+
+            table th {
+                background: linear-gradient(135deg, #38bdf8, #0284c7);
+                color: #020617;
+            }
+
+            table td {
+                border-bottom: 1px solid #334155;
+            }
+
+            tr:nth-child(even) {
+                background: rgba(255,255,255,0.03);
+            }
+
+            .stat-box {
+                background: rgba(255,255,255,0.05);
+            }
+
+            .stat-value {
+                color: #38bdf8;
+            }
+
+            .accuracy-bar {
+                background: #334155;
+            }
+
+            .accuracy-fill {
+                background: linear-gradient(90deg,#22c55e,#16a34a);
+            }
+
+            .timestamp {
+                color: #94a3b8;
+                border-top: 1px solid #334155;
+            }
+            </style>
+            """
+
+        # 默认 light theme
+        return """
+        <style>
+        body {
+            background: #ffffff;
+        }
+
+        .page {
+            background: linear-gradient(135deg,#f5f7fa,#c3cfe2);
+            color: #111;
+        }
+
+        h1 {
+            border-bottom: 3px solid #3498db;
+        }
+
+        table th {
             background: linear-gradient(135deg,#3498db,#2980b9);
-            color:white;
-            padding:14px;
+            color: white;
         }
 
-        td {
-            padding:12px 14px;
-            border-bottom:1px solid #eee;
+        table td {
+            border-bottom: 1px solid #eee;
         }
 
         tr:nth-child(even) {
             background:#f8f9fa;
         }
 
-        .badge {
-            display:inline-block;
-            padding:4px 10px;
-            border-radius:14px;
-            font-size:12px;
-            font-weight:bold;
-            color:white;
-        }
-
-        .badge-correct { background:#27ae60; }
-        .badge-wrong   { background:#e74c3c; }
-        .badge-tip     { background:#f39c12; }
-
-        .stats-grid {
-            display:grid;
-            grid-template-columns:repeat(3,1fr);
-            gap:16px;
-            margin-top:20px;
-        }
-
         .stat-box {
             background:#f8f9fa;
-            border-radius:12px;
-            padding:18px;
-            text-align:center;
         }
 
         .stat-value {
-            font-size:26px;
-            font-weight:bold;
             color:#3498db;
         }
 
         .accuracy-bar {
-            height:10px;
             background:#ecf0f1;
-            border-radius:5px;
-            overflow:hidden;
-            margin:8px 0 20px;
         }
 
         .accuracy-fill {
-            height:100%;
             background:linear-gradient(90deg,#2ecc71,#27ae60);
         }
 
         .timestamp {
-            margin-top:24px;
-            text-align:center;
-            font-size:12px;
             color:#999;
             border-top:1px solid #eee;
-            padding-top:12px;
         }
         </style>
         """
@@ -178,10 +260,11 @@ class QnAStatsRenderer:
         <head>
             <meta charset="utf-8">
             <title>{title}</title>
-            {self.css}
+            {self._layout_css()}
+            {self._theme_css()}
         </head>
         <body>
-            <div class="card">
+            <div class="page">
                 {body}
                 <div class="timestamp">
                     生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
@@ -198,6 +281,7 @@ class QnAStatsRenderer:
             custom_flags=[
                 "--disable-smart-width",
                 "--hide-scrollbars",
+                "--force-device-scale-factor=1",
             ],
         )
 
@@ -217,7 +301,7 @@ class QnAStatsRenderer:
         html = self._build_html(html_body, title)
         return self._html_to_image(html, filename, self.CARD_WIDTH, height)
 
-    # ======================= Markdown builders =======================
+    # ======================= Markdown builders（原样保留） =======================
 
     def format_hints_leaderboard(self, users: List[UserQnAStats]) -> str:
         md = "# 💡 提示次数排行榜\n\n"
@@ -244,9 +328,9 @@ class QnAStatsRenderer:
 
 <table>
 <tr><th>类型</th><th>数量</th><th>占比</th></tr>
-<tr><td><span class="badge badge-correct">正确</span></td><td>{u.correct_count}</td><td>{acc:.1f}%</td></tr>
-<tr><td><span class="badge badge-wrong">错误</span></td><td>{u.wrong_count}</td><td>{100-acc:.1f}%</td></tr>
-<tr><td><span class="badge badge-tip">提示</span></td><td>{u.tip_count}</td><td>-</td></tr>
+<tr><td>正确</td><td>{u.correct_count}</td><td>{acc:.1f}%</td></tr>
+<tr><td>错误</td><td>{u.wrong_count}</td><td>{100-acc:.1f}%</td></tr>
+<tr><td>提示</td><td>{u.tip_count}</td><td>-</td></tr>
 </table>
 
 <div class="accuracy-bar">
@@ -260,7 +344,7 @@ class QnAStatsRenderer:
 </div>
 """
 
-    # ======================= Public APIs（不变） =======================
+    # ======================= Public APIs =======================
 
     async def generate_hints_leaderboard_image(self, users) -> str:
         md = self.format_hints_leaderboard(users)
@@ -283,6 +367,7 @@ class QnAStatsRenderer:
             None,
             lambda: self.render_to_image(md, name, f"用户信息 - {user_stats.user_name}", height)
         )
+
     def format_leaderboard(
         self,
         users: List[UserQnAStats],
@@ -309,6 +394,7 @@ class QnAStatsRenderer:
             )
 
         return md
+
     async def generate_correct_leaderboard_image(self, users) -> str:
         md = self.format_leaderboard(
             users,
@@ -324,6 +410,7 @@ class QnAStatsRenderer:
             None,
             lambda: self.render_to_image(md, name, "正确次数排行榜", height)
         )
+
     async def generate_wrong_leaderboard_image(self, users) -> str:
         md = self.format_leaderboard(
             users,
