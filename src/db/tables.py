@@ -24,6 +24,9 @@ class UserQnAStats(SQLModel, table=True):
     # 答错次数 - 用户回答错误的问题数量
     wrong_count: int = Field(default=0, description="答错次数，用户回答错误的问题数量")
 
+    # 提示次数 - 用户使用提示的次数
+    tip_count: int = Field(default=0, description="提示次数，用户使用提示的次数")
+
     # 创建时间 - 记录首次创建的时间，不可修改
     created_at: datetime = Field(
         default_factory=datetime.now,

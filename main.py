@@ -3,6 +3,9 @@ from astrbot.api.star import Context, Star, register
 from typing import Optional, Dict, Any, Tuple, List
 import astrbot.api.message_components as Comp
 from astrbot.api import AstrBotConfig, logger
+from astrbot.api.star import StarTools
+from .src.db.database import DBManager
+from .src.db.repo import UserQnARepo
 from difflib import SequenceMatcher
 from urllib.parse import urlparse
 from io import BytesIO
@@ -34,6 +37,12 @@ class Mrfzccl(Star):
         # 添加 HTTP 会话管理
         self._session: Optional[aiohttp.ClientSession] = None
         self._executor = None  # 线程池执行器
+
+        self.db_path = self.Config.get("db_path", None)
+        if self.db_path is None:
+            self.db_path = str(StarTools.get_data_dir())
+        self.db = DBManager(db_path = self.db_path)
+        self.user_qna_repo = UserQnARepo(self.db)
 
         # 设置默认配置
         self.target_size = self.Config.get("target_size", 128)
@@ -138,12 +147,20 @@ class Mrfzccl(Star):
             ]
             yield event.chain_result(chain)
             yield await self.send_original_image(user_id, event)
+            await self.user_qna_repo.increment_correct_count(
+                user_id = event.get_sender_id(),
+                user_name = event.get_sender_name()
+            )
         else:
             chain = [
                 Comp.At(qq=event.get_sender_id()),
                 Comp.Plain("回答错误!")
             ]
             yield event.chain_result(chain)
+            await self.user_qna_repo.increment_wrong_count(
+                user_id = event.get_sender_id(),
+                user_name = event.get_sender_name()
+            )
 
     # 强制结束游戏
     @filter.command("fce")
@@ -177,6 +194,178 @@ class Mrfzccl(Star):
             name_len = self.player[user_id]["fctn"] - 2
             yield event.plain_result(f"这个干员的前{name_len}个字为:{self.player[user_id]['name'][:name_len]}")
         self.player[user_id]["fctn"] += 1
+        await self.user_qna_repo.increment_tip_count(
+            user_id=event.get_sender_id(),
+            user_name=event.get_sender_name()
+        )
+
+    # 获取正确个数的排行榜
+    @filter.command("cal")
+    async def correct_answers_leaderboard(self, event: AstrMessageEvent):
+        """获取正确个数的排行榜 /fc cal"""
+        try:
+            # 获取排行榜数据（前10名）
+            users = await self.user_qna_repo.get_correct_answers_leaderboard(limit=10)
+
+            if not users:
+                yield event.plain_result("📊 当前还没有用户的答题记录哦~")
+                return
+
+            # 构建排行榜消息
+            message = "🏆 **正确量排行榜** 🏆\n\n"
+
+            for i, user in enumerate(users, 1):
+                if i == 1:
+                    medal = "🥇"
+                elif i == 2:
+                    medal = "🥈"
+                elif i == 3:
+                    medal = "🥉"
+                else:
+                    medal = f"{i}."
+
+                # 计算准确率
+                total_answers = user.correct_count + user.wrong_count
+                accuracy = (user.correct_count / total_answers * 100) if total_answers > 0 else 0
+
+                message += f"{medal} {user.user_name}\n"
+                message += f"   ✅ 正确: {user.correct_count} | ❌ 错误: {user.wrong_count} | 💡 提示: {user.tip_count}\n"
+                message += f"   📈 准确率: {accuracy:.1f}% | 📅 最后更新: {user.updated_at.strftime('%Y-%m-%d')}\n\n"
+
+            # 添加统计信息
+            summary = await self.user_qna_repo.get_leaderboard_summary()
+            message += f"📊 **统计信息**\n"
+            message += f"总用户数: {summary['total_users']} | 总答题数: {summary['total_questions']}\n"
+            message += f"总正确数: {summary['total_correct']} | 总错误数: {summary['total_wrong']}\n"
+            message += f"平均正确数: {summary['avg_correct']:.1f}"
+
+            yield event.plain_result(message)
+
+        except Exception as e:
+            yield event.plain_result(f"获取排行榜时出现错误: {str(e)}")
+
+    # 获取错误个数的排行榜
+    @filter.command("wal")
+    async def wrong_answers_leaderboard(self, event: AstrMessageEvent):
+        """获取错误个数的排行榜 /fc wal"""
+        try:
+            # 获取排行榜数据（前10名）
+            users = await self.user_qna_repo.get_wrong_answers_leaderboard(limit=10)
+
+            if not users:
+                yield event.plain_result("📊 当前还没有用户的答题记录哦~")
+                return
+
+            # 构建排行榜消息
+            message = "💥 **错误个数排行榜** 💥\n\n"
+
+            for i, user in enumerate(users, 1):
+                medal = ""
+                if i == 1:
+                    medal = "💣"  # 炸弹表示错误最多
+                elif i == 2:
+                    medal = "🧨"
+                elif i == 3:
+                    medal = "🎆"
+                else:
+                    medal = f"{i}."
+
+                # 计算错误率
+                total_answers = user.correct_count + user.wrong_count
+                error_rate = (user.wrong_count / total_answers * 100) if total_answers > 0 else 0
+
+                message += f"{medal} {user.user_name}\n"
+                message += f"   ❌ 错误: {user.wrong_count} | ✅ 正确: {user.correct_count} | 💡 提示: {user.tip_count}\n"
+                message += f"   📉 错误率: {error_rate:.1f}% | 📅 最后更新: {user.updated_at.strftime('%Y-%m-%d')}\n\n"
+
+            yield event.plain_result(message)
+
+        except Exception as e:
+            yield event.plain_result(f"获取排行榜时出现错误: {str(e)}")
+
+    # 获取使用提示次数的排行榜
+    @filter.command("hul")
+    async def hints_usage_leaderboard(self, event: AstrMessageEvent):
+        """获取使用提示次数的排行榜 /fc hul"""
+        try:
+            # 获取排行榜数据（前10名）
+            users = await self.user_qna_repo.get_hints_usage_leaderboard(limit=10)
+
+            if not users:
+                yield event.plain_result("📊 当前还没有用户的答题记录哦~")
+                return
+
+            # 构建排行榜消息
+            message = "💡 **提示次数排行榜** 💡\n\n"
+
+            for i, user in enumerate(users, 1):
+                medal = ""
+                if i == 1:
+                    medal = "🎯"  # 靶心表示最依赖提示
+                elif i == 2:
+                    medal = "🔍"
+                elif i == 3:
+                    medal = "🧩"
+                else:
+                    medal = f"{i}."
+
+                # 计算提示频率（每道题平均提示次数）
+                total_answers = user.correct_count + user.wrong_count
+                tips_per_question = (user.tip_count / total_answers) if total_answers > 0 else 0
+
+                message += f"{medal} {user.user_name}\n"
+                message += f"   💡 提示: {user.tip_count} | ✅ 正确: {user.correct_count} | ❌ 错误: {user.wrong_count}\n"
+                message += f"   📊 提示频率: {tips_per_question:.2f}/题 | 📅 最后更新: {user.updated_at.strftime('%Y-%m-%d')}\n\n"
+
+            yield event.plain_result(message)
+
+        except Exception as e:
+            yield event.plain_result(f"获取排行榜时出现错误: {str(e)}")
+
+    # 获取个人信息获取
+    @filter.command("upr")
+    async def user_profile_retrieval(self, event: AstrMessageEvent, user_id: str | None = None):
+        """获取个人信息获取 /fc upr [user_id] (如果user_id为空默认为发送人)"""
+        try:
+            # 确定用户ID
+            target_user_id = user_id or event.get_sender_id()
+
+            # 获取用户信息及排名
+            user_stats, rank_info = await self.user_qna_repo.get_user_profile_with_rank(target_user_id)
+
+            if not user_stats:
+                yield event.plain_result("❌ 未找到该用户的答题记录")
+                return
+
+            # 构建个人信息消息
+            message = f"👤 **用户信息 - {user_stats.user_name}**\n\n"
+
+            # 基础统计
+            total_answers = user_stats.correct_count + user_stats.wrong_count
+            accuracy = (user_stats.correct_count / total_answers * 100) if total_answers > 0 else 0
+
+            message += f"📊 **基础统计**\n"
+            message += f"✅ 正确: {user_stats.correct_count}\n"
+            message += f"❌ 错误: {user_stats.wrong_count}\n"
+            message += f"💡 提示: {user_stats.tip_count}\n"
+            message += f"🎯 准确率: {accuracy:.1f}%\n"
+            message += f"📝 总答题数: {total_answers}\n\n"
+
+            # 排名信息
+            message += f"🏆 **排名信息** (共{rank_info['total_users']}人)\n"
+            message += f"✅ 正确排名: 第{rank_info['correct_rank']}名\n"
+            message += f"❌ 错误排名: 第{rank_info['wrong_rank']}名\n"
+            message += f"💡 提示排名: 第{rank_info['tip_rank']}名\n\n"
+
+            # 时间信息
+            message += f"📅 **时间信息**\n"
+            message += f"⏰ 注册时间: {user_stats.created_at.strftime('%Y-%m-%d %H:%M')}\n"
+            message += f"🔄 最后更新: {user_stats.updated_at.strftime('%Y-%m-%d %H:%M')}\n"
+
+            yield event.plain_result(message)
+
+        except Exception as e:
+            yield event.plain_result(f"获取用户信息时出现错误: {str(e)}")
 
     # 发送原始图片
     async def send_original_image(self, user_id: str, event: AstrMessageEvent):
@@ -205,26 +394,6 @@ class Mrfzccl(Star):
         else:
             logger.warning(f"[send_original_image] 用户 {user_id} 没有原始图片")
             return event.plain_result("无法获取正确答案图片")
-
-    # 显示帮助
-    @filter.command("fch")
-    async def fch(self, event: AstrMessageEvent):
-        """获取帮助文档 /fch"""
-        help_text = """fc 插件使用说明
-            1. 开始游戏
-            命令：/fc
-            说明：生成遮挡图片并发出
-            2. 猜角色
-            命令：/fcc [角色名称]
-            说明：进行角色猜测
-            3. 强制结束游戏
-            命令：/fce
-            说明：结束当前进行的游戏并显示原图
-            3. 提示功能
-            命令：/fct
-            说明：获取提示
-            """
-        yield event.plain_result(help_text)
 
     # 结束游戏并清理资源
     def end_game(self, user_id: str) -> None:
