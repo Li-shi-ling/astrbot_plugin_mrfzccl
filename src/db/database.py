@@ -1,15 +1,19 @@
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-from sqlalchemy import inspect, text
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
+
+import os
 
 
 class DBManager:
     """数据库管理器，负责异步连接和会话管理"""
 
     def __init__(self, db_path: str):
+        os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
+
         self.db_url = f"sqlite+aiosqlite:///{db_path}"
 
         # 创建异步引擎
@@ -31,12 +35,12 @@ class DBManager:
 
     async def init_db(self):
         """初始化数据库，创建所有定义的表"""
-        # 必须显式导入模型类，确保它们被注册到 SQLModel.metadata 中
-        from ..models.tables import (  # noqa: F401
-            LoveDailyRef,
-            MessageOwnerIndex,
-            UserCooldown,
+        from .tables import (
+            UserQnAStats
         )
+
+        async with self.engine.begin() as conn:
+            await conn.run_sync(SQLModel.metadata.create_all)
 
         # 2. SQLite 优化 PRAGMA
         async with self.engine.connect() as conn:

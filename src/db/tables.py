@@ -1,60 +1,37 @@
-from datetime import date as DateType
-
+from datetime import datetime
+from typing import Optional
 from sqlmodel import Field, SQLModel
 
 
-class LoveDailyRef(SQLModel, table=True):
-    """每日恋爱成分指标快照，存储每个用户在群组中的各项互动数据"""
+class UserQnAStats(SQLModel, table=True):
+    """用户问答统计表 - 记录用户的答题统计数据"""
 
-    __tablename__ = "love_daily_ref"
+    __tablename__ = "user_qna_stats"
     __table_args__ = {"extend_existing": True}
 
-    id: int | None = Field(default=None, primary_key=True)
-    date: DateType = Field(index=True)
-    group_id: str = Field(index=True)
-    user_id: str = Field(index=True)
+    # 主键ID - 自增主键，每条记录的唯一标识
+    id: Optional[int] = Field(default=None, primary_key=True, description="主键ID，自增唯一标识")
 
-    # 文字指标
-    msg_sent: int = Field(default=0)
-    text_len_total: int = Field(default=0)
+    # 用户ID - 用户的唯一标识符，用于关联用户
+    user_id: str = Field(index=True, description="用户ID，用户的唯一标识符")
 
-    # 互动指标
-    reply_sent: int = Field(default=0)
-    reply_received: int = Field(default=0)
-    poke_sent: int = Field(default=0)
-    poke_received: int = Field(default=0)
-    reaction_sent: int = Field(default=0)
-    reaction_received: int = Field(default=0)
+    # 用户名称 - 用户的显示名称，用于展示
+    user_name: str = Field(index=True, description="用户名称，用户的显示名称")
 
-    # 负面指标
-    recall_count: int = Field(default=0)
-    repeat_count: int = Field(default=0)  # 重复/刷屏次数
+    # 答对次数 - 用户回答正确的问题数量
+    correct_count: int = Field(default=0, description="答对次数，用户回答正确的问题数量")
 
-    # 多媒体/梗图指标
-    image_sent: int = Field(default=0)
-    topic_count: int = Field(default=0)  # 破冰/开场次数
+    # 答错次数 - 用户回答错误的问题数量
+    wrong_count: int = Field(default=0, description="答错次数，用户回答错误的问题数量")
 
-    updated_at: float = Field(default=0.0)  # 更新时间戳
+    # 创建时间 - 记录首次创建的时间，不可修改
+    created_at: datetime = Field(
+        default_factory=datetime.now,
+        description="创建时间，记录首次创建的时间，自动生成且不可修改"
+    )
 
-
-class MessageOwnerIndex(SQLModel, table=True):
-    """消息归属索引，用于将后续的 Reaction 归因到具体的发送者"""
-
-    __tablename__ = "message_owner_index"
-    __table_args__ = {"extend_existing": True}
-
-    message_id: str = Field(primary_key=True)
-    user_id: str
-    group_id: str
-    timestamp: float  # 时间戳
-
-
-class UserCooldown(SQLModel, table=True):
-    """用户指令触发冷却记录（按群组隔离）"""
-
-    __tablename__ = "user_cooldown"
-    __table_args__ = {"extend_existing": True}
-
-    user_id: str = Field(primary_key=True)
-    group_id: str = Field(primary_key=True)
-    last_rate_at: float = Field(default=0.0)
+    # 更新时间 - 记录最后一次更新的时间，每次修改记录时自动更新
+    updated_at: datetime = Field(
+        default_factory=datetime.now,
+        description="更新时间，记录最后一次更新的时间，每次修改记录时自动更新"
+    )
