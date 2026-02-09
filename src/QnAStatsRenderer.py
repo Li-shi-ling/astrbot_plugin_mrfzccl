@@ -13,6 +13,14 @@ try:
 except ImportError:
     HTML2IMAGE_AVAILABLE = False
 
+# 检查markdown_it是否可用
+try:
+    from markdown_it import MarkdownIt
+
+    MARKDOWN_IT_AVAILABLE = True
+except ImportError:
+    MARKDOWN_IT_AVAILABLE = False
+
 from .db.tables import UserQnAStats
 
 
@@ -47,6 +55,25 @@ class QnAStatsRenderer:
             raise ImportError(
                 "Html2Image包未安装，无法生成图片。请安装：pip install html2image"
             )
+
+        # 检查markdown_it是否安装
+        if not MARKDOWN_IT_AVAILABLE:
+            raise ImportError(
+                "markdown-it-py包未安装，无法渲染Markdown。请安装：pip install markdown-it-py"
+            )
+
+        self.md = (
+            MarkdownIt(
+                "commonmark",
+                {
+                    "html": True,
+                    "linkify": True,
+                    "typographer": True,
+                }
+            )
+            .enable("table")
+            .enable("strikethrough")
+        )
 
     # ======================= CSS（核心拆分） =======================
 
@@ -261,6 +288,9 @@ class QnAStatsRenderer:
 
     # ======================= render core =======================
 
+    def _render_markdown(self, markdown: str) -> str:
+        return self.md.render(markdown)
+
     def _build_html(self, body: str, title: str) -> str:
         return f"""
         <!DOCTYPE html>
@@ -295,8 +325,8 @@ class QnAStatsRenderer:
             pass
 
     def render_to_image(self, markdown: str, filename: str, title: str, height: int) -> str:
-        # 不再需要Markdown渲染，直接使用传入的markdown字符串作为HTML内容
-        html = self._build_html(markdown, title)
+        html_body = self._render_markdown(markdown)
+        html = self._build_html(html_body, title)
         return self._html_to_image(html, filename, self.CARD_WIDTH, height)
 
     # ======================= Markdown builders（原样保留） =======================

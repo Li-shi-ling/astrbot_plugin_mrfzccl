@@ -10,11 +10,5 @@
     "type": "int",
     "default": 512,
     "hint": "例如：512"
-  },
-  "db_path": {
-    "description": "数据库存储位置(为空为astrbot的默认存储位置)",
-    "type": "string",
-    "default": "",
-    "hint": "例如：/home/user/db"
   }
 }

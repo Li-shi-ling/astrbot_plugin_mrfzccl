@@ -40,10 +40,11 @@ class Mrfzccl(Star):
         self._session: Optional[aiohttp.ClientSession] = None
         self._executor = None  # 线程池执行器
 
-        self.db_path = self.Config.get("db_path", None)
-        if self.db_path is None:
-            self.db_path = str(StarTools.get_data_dir())
-        self.db = DBManager(db_path = self.db_path)
+        self.db_path = str(StarTools.get_data_dir() / "mrfzccl.db")
+        logger.debug(f"[Mrfzccl] 数据库使用 {self.db_path}")
+        self.db = DBManager(
+            db_path = self.db_path
+        )
         self.user_qna_repo = UserQnARepo(self.db)
 
         self.img_tmp_path = StarTools.get_data_dir() / "tmp"
@@ -717,6 +718,7 @@ class Mrfzccl(Star):
     # 插件初始化时
     async def initialize(self):
         await self.db.init_db()
+        logger.debug(f"[Mrfzccl] 初始化数据库{self.db.db_url}")
         await self.start_cleanup_task()
 
     # 插件卸载时的清理钩子
