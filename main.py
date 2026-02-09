@@ -455,9 +455,8 @@ class Mrfzccl(Star):
                 return output_data
             except Exception as e:
                 logger.error(f"[send_original_image] 发送原始图片失败: {e}")
-                return event.plain_result("发送正确答案图片失败")
-            finally:
                 self.end_game(user_id)
+                return event.plain_result("发送正确答案图片失败")
         else:
             logger.warning(f"[send_original_image] 用户 {user_id} 没有原始图片")
             return event.plain_result("无法获取正确答案图片")
@@ -465,6 +464,7 @@ class Mrfzccl(Star):
     # 结束游戏并清理资源
     def end_game(self, user_id: str) -> None:
         self.player.pop(user_id, None)
+        self.original_images.pop(user_id, None)
 
     # 检查用户是否有活跃游戏
     def has_active_game(self, user_id: str) -> bool:
@@ -482,11 +482,17 @@ class Mrfzccl(Star):
                 logger.error(f"[fc_init] 提取题目失败")
                 self.player.pop(user_id, None)
                 return None
-            image = await self.get_image_from_url(question["url"])
-            if not image:
-                logger.error(f"[fc_init] 获取图片失败")
+            try:
+                image = await self.get_image_from_url(question["url"])
+                if not image:
+                    logger.error(f"[fc_init] 获取图片失败")
+                    self.player.pop(user_id, None)
+                    return None
+            except Exception as e:
+                logger.error(f"[fc_init] 获取图片失败,e:{e}")
                 self.player.pop(user_id, None)
                 return None
+
             self.original_images[user_id] = image.copy()
             question["status"] = "active"
             self.player[user_id] = question
@@ -729,17 +735,18 @@ class Mrfzccl(Star):
 
     # 关闭定时清理任务
     async def stop_cleanup_task(self):
-        """停止定时清理任务"""
+        """停止定时清理任务（带超时保护）"""
         self.cleanup_running = False
 
-        if self.cleanup_task and not self.cleanup_task.done():
-            # 取消任务
+        if self.cleanup_task:
             self.cleanup_task.cancel()
             try:
-                # 等待任务完全取消
-                await self.cleanup_task
+                # 最多等 2 秒让任务自己退出
+                await asyncio.wait_for(self.cleanup_task, timeout=2)
+            except asyncio.TimeoutError:
+                logger.warning("[Mrfzccl] 清理任务取消超时，强制退出")
             except asyncio.CancelledError:
-                # 预期中的取消异常
+                # 正常情况
                 pass
             finally:
                 self.cleanup_task = None
