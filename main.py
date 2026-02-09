@@ -24,7 +24,7 @@ import re
 @register("mrfzccl", "Lishining", "你知道的,我一直是明日方舟高手", "1.0.0")
 class Mrfzccl(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
-        super().__init__(context)
+        super().__init__(context, config)
         self.Config = config
         self.player: Dict[str, Dict[str, Any]] = {}
         self.original_images: Dict[str, Image.Image] = {}  # 保存原始图片对象
@@ -190,7 +190,7 @@ class Mrfzccl(Star):
     # 获取正确个数的排行榜
     @filter.command("cal")
     async def correct_answers_leaderboard(self, event: AstrMessageEvent):
-        """获取正确个数的排行榜 /fc cal"""
+        """获取正确个数的排行榜 /cal"""
         try:
             # 获取排行榜数据（前10名）
             users = await self.user_qna_repo.get_correct_answers_leaderboard(limit=10)
@@ -216,7 +216,7 @@ class Mrfzccl(Star):
     # 获取错误个数的排行榜
     @filter.command("wal")
     async def wrong_answers_leaderboard(self, event: AstrMessageEvent):
-        """获取错误个数的排行榜 /fc wal"""
+        """获取错误个数的排行榜 /wal"""
         try:
             # 获取排行榜数据（前10名）
             users = await self.user_qna_repo.get_wrong_answers_leaderboard(limit=10)
@@ -239,7 +239,7 @@ class Mrfzccl(Star):
     # 获取使用提示次数的排行榜
     @filter.command("hul")
     async def hints_usage_leaderboard(self, event: AstrMessageEvent):
-        """获取使用提示次数的排行榜 /fc hul"""
+        """获取使用提示次数的排行榜 /hul"""
         try:
             # 获取排行榜数据（前10名）
             users = await self.user_qna_repo.get_hints_usage_leaderboard(limit=10)
@@ -262,7 +262,7 @@ class Mrfzccl(Star):
     # 获取个人信息获取
     @filter.command("upr")
     async def user_profile_retrieval(self, event: AstrMessageEvent, user_id: str | None = None):
-        """获取个人信息获取 /fc upr [user_id] (如果user_id为空默认为发送人)"""
+        """获取个人信息获取 /upr [user_id] (如果user_id为空默认为发送人)"""
         try:
             # 确定用户ID
             target_user_id = user_id or event.get_sender_id()
@@ -716,6 +716,7 @@ class Mrfzccl(Star):
 
     # 插件初始化时
     async def initialize(self):
+        await self.db.init_db()
         await self.start_cleanup_task()
 
     # 插件卸载时的清理钩子

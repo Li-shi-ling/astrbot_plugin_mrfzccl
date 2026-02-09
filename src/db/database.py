@@ -1,9 +1,10 @@
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-from sqlalchemy import text
+from sqlalchemy import text, inspect
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
+from sqlalchemy.exc import OperationalError
 
 import os
 
@@ -22,8 +23,8 @@ class DBManager:
             echo=False,
             pool_pre_ping=True,
             pool_recycle=3600,
-            pool_size=5,
-            max_overflow=5,
+            # pool_size=5,
+            # max_overflow=5,
         )
 
         # 创建会话工厂
@@ -35,14 +36,16 @@ class DBManager:
 
     async def init_db(self):
         """初始化数据库，创建所有定义的表"""
-        from .tables import (
-            UserQnAStats
-        )
+        from .tables import UserQnAStats
 
         async with self.engine.begin() as conn:
-            await conn.run_sync(SQLModel.metadata.create_all)
+            try:
+                await conn.run_sync(SQLModel.metadata.create_all)
+            except OperationalError as e:
+                if not "already exists" in str(e):
+                    raise
 
-        # 2. SQLite 优化 PRAGMA
+        # SQLite 优化 PRAGMA
         async with self.engine.connect() as conn:
             await conn.execute(text("PRAGMA journal_mode=WAL"))
             await conn.execute(text("PRAGMA synchronous=NORMAL"))
@@ -50,6 +53,7 @@ class DBManager:
             await conn.execute(text("PRAGMA temp_store=MEMORY"))
             await conn.execute(text("PRAGMA mmap_size=134217728"))
             await conn.execute(text("PRAGMA optimize"))
+            await conn.commit()
 
     @asynccontextmanager
     async def get_session(self) -> AsyncGenerator[AsyncSession, None]:

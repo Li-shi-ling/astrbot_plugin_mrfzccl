@@ -5,8 +5,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import List
 
-from html2image import Html2Image
-from markdown_it import MarkdownIt
+# 检查Html2Image是否可用
+try:
+    from html2image import Html2Image
+
+    HTML2IMAGE_AVAILABLE = True
+except ImportError:
+    HTML2IMAGE_AVAILABLE = False
 
 from .db.tables import UserQnAStats
 
@@ -37,18 +42,11 @@ class QnAStatsRenderer:
 
         self.theme = theme
 
-        self.md = (
-            MarkdownIt(
-                "commonmark",
-                {
-                    "html": True,
-                    "linkify": True,
-                    "typographer": True,
-                }
+        # 检查Html2Image是否安装
+        if not HTML2IMAGE_AVAILABLE:
+            raise ImportError(
+                "Html2Image包未安装，无法生成图片。请安装：pip install html2image"
             )
-            .enable("table")
-            .enable("strikethrough")
-        )
 
     # ======================= CSS（核心拆分） =======================
 
@@ -255,16 +253,13 @@ class QnAStatsRenderer:
 
     def _calc_table_height(self, row_count: int) -> int:
         return (
-            self.BASE_HEIGHT
-            + self.TABLE_HEADER_HEIGHT
-            + row_count * self.TABLE_ROW_HEIGHT
-            + self.SAFE_PADDING
+                self.BASE_HEIGHT
+                + self.TABLE_HEADER_HEIGHT
+                + row_count * self.TABLE_ROW_HEIGHT
+                + self.SAFE_PADDING
         )
 
     # ======================= render core =======================
-
-    def _render_markdown(self, markdown: str) -> str:
-        return self.md.render(markdown)
 
     def _build_html(self, body: str, title: str) -> str:
         return f"""
@@ -300,8 +295,8 @@ class QnAStatsRenderer:
             pass
 
     def render_to_image(self, markdown: str, filename: str, title: str, height: int) -> str:
-        html_body = self._render_markdown(markdown)
-        html = self._build_html(html_body, title)
+        # 不再需要Markdown渲染，直接使用传入的markdown字符串作为HTML内容
+        html = self._build_html(markdown, title)
         return self._html_to_image(html, filename, self.CARD_WIDTH, height)
 
     # ======================= Markdown builders（原样保留） =======================
@@ -332,18 +327,18 @@ class QnAStatsRenderer:
 <table>
 <tr><th>类型</th><th>数量</th><th>占比</th></tr>
 <tr><td>正确</td><td>{u.correct_count}</td><td>{acc:.1f}%</td></tr>
-<tr><td>错误</td><td>{u.wrong_count}</td><td>{100-acc:.1f}%</td></tr>
+<tr><td>错误</td><td>{u.wrong_count}</td><td>{100 - acc:.1f}%</td></tr>
 <tr><td>提示</td><td>{u.tip_count}</td><td>-</td></tr>
 </table>
 
 <div class="accuracy-bar">
-  <div class="accuracy-fill" style="width:{min(acc,100)}%"></div>
+  <div class="accuracy-fill" style="width:{min(acc, 100)}%"></div>
 </div>
 
 <div class="stats-grid">
-  <div class="stat-box"><div>正确排名</div><div class="stat-value">#{rank.get("correct_rank","-")}</div></div>
-  <div class="stat-box"><div>错误排名</div><div class="stat-value">#{rank.get("wrong_rank","-")}</div></div>
-  <div class="stat-box"><div>提示排名</div><div class="stat-value">#{rank.get("tip_rank","-")}</div></div>
+  <div class="stat-box"><div>正确排名</div><div class="stat-value">#{rank.get("correct_rank", "-")}</div></div>
+  <div class="stat-box"><div>错误排名</div><div class="stat-value">#{rank.get("wrong_rank", "-")}</div></div>
+  <div class="stat-box"><div>提示排名</div><div class="stat-value">#{rank.get("tip_rank", "-")}</div></div>
 </div>
 """
 
@@ -372,10 +367,10 @@ class QnAStatsRenderer:
         )
 
     def format_leaderboard(
-        self,
-        users: List[UserQnAStats],
-        title: str,
-        key: str,
+            self,
+            users: List[UserQnAStats],
+            title: str,
+            key: str,
     ) -> str:
         md = f"# {title}\n\n"
         md += "| 排名 | 用户 | 数量 | 正确 | 错误 | 提示 |\n"
