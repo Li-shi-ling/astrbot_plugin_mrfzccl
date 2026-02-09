@@ -61,6 +61,7 @@ class QnAStatsRenderer:
             height: 100%;
             margin: 0;
             padding: 0;
+            background: transparent;
         }
 
         body {
@@ -68,19 +69,30 @@ class QnAStatsRenderer:
                          "Segoe UI", "PingFang SC",
                          "Microsoft YaHei", Arial;
             overflow: hidden;
+            background: transparent;
+        }
+
+        .content-container {
+            width: 100%;
+            min-height: 100%;
+            background: #f5f5f5;
+            box-sizing: border-box;
+            padding: 10px;
         }
 
         .page {
-            width: 100vw;
-            height: 100vh;
+            width: 100%;
+            min-height: 100%;
             box-sizing: border-box;
-            padding: 28px;
+            padding: 15px;
+            background: transparent;
         }
 
         h1 {
             text-align: center;
             padding-bottom: 12px;
-            margin-bottom: 20px;
+            margin-bottom: 15px;
+            margin-top: 5px;
         }
 
         table {
@@ -124,7 +136,8 @@ class QnAStatsRenderer:
         }
 
         .timestamp {
-            margin-top: 24px;
+            margin-top: 20px;
+            margin-bottom: 15px;
             text-align: center;
             font-size: 12px;
             padding-top: 12px;
@@ -138,11 +151,11 @@ class QnAStatsRenderer:
             return """
             <style>
             body {
-                background: #0f172a;
+                background: transparent;
             }
 
             .page {
-                background: linear-gradient(135deg, #1e293b, #020617);
+                background: transparent;
                 color: #e5e7eb;
             }
 
@@ -160,11 +173,11 @@ class QnAStatsRenderer:
             }
 
             tr:nth-child(even) {
-                background: rgba(255,255,255,0.03);
+                background: transparent;
             }
 
             .stat-box {
-                background: rgba(255,255,255,0.05);
+                background: transparent;
             }
 
             .stat-value {
@@ -172,7 +185,7 @@ class QnAStatsRenderer:
             }
 
             .accuracy-bar {
-                background: #334155;
+                background: transparent;
             }
 
             .accuracy-fill {
@@ -190,11 +203,11 @@ class QnAStatsRenderer:
         return """
         <style>
         body {
-            background: #ffffff;
+            background: transparent;
         }
 
         .page {
-            background: linear-gradient(135deg,#f5f7fa,#c3cfe2);
+            background: transparent;
             color: #111;
         }
 
@@ -212,11 +225,11 @@ class QnAStatsRenderer:
         }
 
         tr:nth-child(even) {
-            background:#f8f9fa;
+            background:transparent;
         }
 
         .stat-box {
-            background:#f8f9fa;
+            background:transparent;
         }
 
         .stat-value {
@@ -224,7 +237,7 @@ class QnAStatsRenderer:
         }
 
         .accuracy-bar {
-            background:#ecf0f1;
+            background:transparent;
         }
 
         .accuracy-fill {
@@ -264,10 +277,12 @@ class QnAStatsRenderer:
             {self._theme_css()}
         </head>
         <body>
-            <div class="page">
-                {body}
-                <div class="timestamp">
-                    生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+            <div class="content-container">
+                <div class="page">
+                    {body}
+                    <div class="timestamp">
+                        生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+                    </div>
                 </div>
             </div>
         </body>
@@ -275,26 +290,14 @@ class QnAStatsRenderer:
         """
 
     def _html_to_image(self, html: str, filename: str, width: int, height: int) -> str:
-        hti = Html2Image(
-            output_path=str(self.output_dir),
-            size=(width, height),
-            custom_flags=[
-                "--disable-smart-width",
-                "--hide-scrollbars",
-                "--force-device-scale-factor=1",
-            ],
-        )
-
-        with tempfile.NamedTemporaryFile("w", suffix=".html", delete=False, encoding="utf-8") as f:
-            f.write(html)
-            temp_path = f.name
+        hti = Html2Image(output_path=str(self.output_dir))
 
         try:
             out = f"{filename}.png"
-            hti.screenshot(html_file=temp_path, save_as=out)
+            hti.screenshot(html_str=html, save_as=out, size=(width, height))
             return str(self.output_dir / out)
         finally:
-            os.unlink(temp_path)
+            pass
 
     def render_to_image(self, markdown: str, filename: str, title: str, height: int) -> str:
         html_body = self._render_markdown(markdown)
