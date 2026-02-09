@@ -17,6 +17,7 @@ import asyncio
 import aiohttp
 import random
 import json
+import time
 import os
 import re
 
@@ -45,8 +46,9 @@ class Mrfzccl(Star):
         self.db = DBManager(db_path = self.db_path)
         self.user_qna_repo = UserQnARepo(self.db)
 
+        self.img_tmp_path = StarTools.get_data_dir() / "tmp"
         self.renderer = QnAStatsRenderer(
-            output_dir = str(StarTools.get_data_dir() / "tmp")
+            output_dir = str(self.img_tmp_path)
         )
 
         # 设置默认配置
@@ -78,27 +80,8 @@ class Mrfzccl(Star):
             logger.error(f"[Mrfzccl] 加载数据文件时发生未知错误: {e}")
             logger.error(traceback.format_exc())
 
-    # 插件卸载时的清理钩子
-    async def terminate(self):
-        self._shutting_down = True
-        if self._session and not self._session.closed:
-            await self._session.close()
-            logger.debug("[Mrfzccl] HTTP会话已关闭")
-
-    # 获取或创建 HTTP 会话
-    async def _get_session(self) -> aiohttp.ClientSession:
-        if self._session is None or self._session.closed:
-            timeout = aiohttp.ClientTimeout(total=10)
-            connector = aiohttp.TCPConnector(limit=10, limit_per_host=5)  # 限制连接池大小
-            self._session = aiohttp.ClientSession(
-                timeout=timeout,
-                connector=connector,
-                headers={
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-                }
-            )
-            logger.debug("[Mrfzccl] 创建新的HTTP会话")
-        return self._session
+        self.cleanup_task: asyncio.Task | None = None
+        self.cleanup_running = True
 
     # 初始化游戏
     @filter.command("fc")
@@ -724,3 +707,93 @@ class Mrfzccl(Star):
         buf = BytesIO()
         image.save(buf, format=format, optimize=True)
         return buf.getvalue()
+
+    # 插件初始化时
+    async def initialize(self):
+        await self.start_cleanup_task()
+
+    # 插件卸载时的清理钩子
+    async def terminate(self):
+        self._shutting_down = True
+        if self._session and not self._session.closed:
+            await self._session.close()
+            logger.debug("[Mrfzccl] HTTP会话已关闭")
+        await self.stop_cleanup_task()
+
+    # 开启定时清理任务
+    async def start_cleanup_task(self, interval_hours=1):
+        """启动定时清理任务"""
+        self.cleanup_running = True
+        self.cleanup_task = asyncio.create_task(self._periodic_cleanup(interval_hours))
+        return self.cleanup_task
+
+    # 关闭定时清理任务
+    async def stop_cleanup_task(self):
+        """停止定时清理任务"""
+        self.cleanup_running = False
+
+        if self.cleanup_task and not self.cleanup_task.done():
+            # 取消任务
+            self.cleanup_task.cancel()
+            try:
+                # 等待任务完全取消
+                await self.cleanup_task
+            except asyncio.CancelledError:
+                # 预期中的取消异常
+                pass
+            finally:
+                self.cleanup_task = None
+
+    # 定时清理任务
+    async def _periodic_cleanup(self, interval_hours=1):
+        """可控制的定期清理"""
+        while self.cleanup_running:
+            try:
+                # 等待指定时间
+                await asyncio.sleep(interval_hours * 3600)
+
+                # 检查是否还在运行
+                if not self.cleanup_running:
+                    break
+
+                # 执行清理
+                await self._cleanup_old_images()
+
+            except asyncio.CancelledError:
+                # 任务被取消
+                break
+            except Exception as e:
+                # 记录错误但不停止任务
+                logger(f"[Mrfzccl] 清理任务出错: {e}")
+                await asyncio.sleep(60)  # 出错后等待1分钟再重试
+
+    # 清理超过指定时间的图片
+    async def _cleanup_old_images(self, max_age_hours=1):
+        """清理超过指定时间的图片"""
+        cutoff_time = time.time() - max_age_hours * 3600
+
+        try:
+            for file_path in self.img_tmp_path.glob("*.png"):
+                if os.path.getmtime(file_path) < cutoff_time:
+                    try:
+                        os.remove(file_path)
+                        print(f"🧹 清理旧图片: {file_path}")
+                    except:
+                        pass
+        except Exception as e:
+            print(f"清理图片时出错: {e}")
+
+    # 获取或创建 HTTP 会话
+    async def _get_session(self) -> aiohttp.ClientSession:
+        if self._session is None or self._session.closed:
+            timeout = aiohttp.ClientTimeout(total=10)
+            connector = aiohttp.TCPConnector(limit=10, limit_per_host=5)  # 限制连接池大小
+            self._session = aiohttp.ClientSession(
+                timeout=timeout,
+                connector=connector,
+                headers={
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                }
+            )
+            logger.debug("[Mrfzccl] 创建新的HTTP会话")
+        return self._session
