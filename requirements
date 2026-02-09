@@ -1,8 +1,1 @@
-sqlalchemy
-sqlmodel
-aiosqlite
-markdown-it-py
 html2image
-pillow
-anyio
-pydantic

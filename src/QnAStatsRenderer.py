@@ -388,8 +388,16 @@ class QnAStatsRenderer:
         )
 
         for i, u in enumerate(sorted_users, 1):
+            if i == 1:
+                medal = "🥇"
+            elif i == 2:
+                medal = "🥈"
+            elif i == 3:
+                medal = "🥉"
+            else:
+                medal = f"{i}"
             md += (
-                f"| {i} | **{u.user_name}** | "
+                f"| {medal} | **{u.user_name}** | "
                 f"{getattr(u, key)} | "
                 f"{u.correct_count} | "
                 f"{u.wrong_count} | "

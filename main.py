@@ -1,6 +1,7 @@
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
 from typing import Optional, Dict, Any, Tuple, List
+from .src.QnAStatsRenderer import QnAStatsRenderer
 import astrbot.api.message_components as Comp
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.star import StarTools
@@ -43,6 +44,10 @@ class Mrfzccl(Star):
             self.db_path = str(StarTools.get_data_dir())
         self.db = DBManager(db_path = self.db_path)
         self.user_qna_repo = UserQnARepo(self.db)
+
+        self.renderer = QnAStatsRenderer(
+            output_dir = str(StarTools.get_data_dir() / "tmp")
+        )
 
         # 设置默认配置
         self.target_size = self.Config.get("target_size", 128)
@@ -211,35 +216,16 @@ class Mrfzccl(Star):
                 yield event.plain_result("📊 当前还没有用户的答题记录哦~")
                 return
 
-            # 构建排行榜消息
-            message = "🏆 **正确量排行榜** 🏆\n\n"
-
-            for i, user in enumerate(users, 1):
-                if i == 1:
-                    medal = "🥇"
-                elif i == 2:
-                    medal = "🥈"
-                elif i == 3:
-                    medal = "🥉"
-                else:
-                    medal = f"{i}."
-
-                # 计算准确率
-                total_answers = user.correct_count + user.wrong_count
-                accuracy = (user.correct_count / total_answers * 100) if total_answers > 0 else 0
-
-                message += f"{medal} {user.user_name}\n"
-                message += f"   ✅ 正确: {user.correct_count} | ❌ 错误: {user.wrong_count} | 💡 提示: {user.tip_count}\n"
-                message += f"   📈 准确率: {accuracy:.1f}% | 📅 最后更新: {user.updated_at.strftime('%Y-%m-%d')}\n\n"
-
-            # 添加统计信息
+            # 获取统计信息
             summary = await self.user_qna_repo.get_leaderboard_summary()
-            message += f"📊 **统计信息**\n"
-            message += f"总用户数: {summary['total_users']} | 总答题数: {summary['total_questions']}\n"
-            message += f"总正确数: {summary['total_correct']} | 总错误数: {summary['total_wrong']}\n"
-            message += f"平均正确数: {summary['avg_correct']:.1f}"
 
-            yield event.plain_result(message)
+            # 使用统一的图片/文本生成函数
+            async for result in self._generate_image_or_fallback(
+                    event=event,
+                    generate_image_func=lambda: self.renderer.generate_correct_leaderboard_image(users),
+                    generate_text_func=lambda: self._generate_correct_leaderboard_text(users, summary),
+            ):
+                yield result
 
         except Exception as e:
             yield event.plain_result(f"获取排行榜时出现错误: {str(e)}")
@@ -256,29 +242,13 @@ class Mrfzccl(Star):
                 yield event.plain_result("📊 当前还没有用户的答题记录哦~")
                 return
 
-            # 构建排行榜消息
-            message = "💥 **错误个数排行榜** 💥\n\n"
-
-            for i, user in enumerate(users, 1):
-                medal = ""
-                if i == 1:
-                    medal = "💣"  # 炸弹表示错误最多
-                elif i == 2:
-                    medal = "🧨"
-                elif i == 3:
-                    medal = "🎆"
-                else:
-                    medal = f"{i}."
-
-                # 计算错误率
-                total_answers = user.correct_count + user.wrong_count
-                error_rate = (user.wrong_count / total_answers * 100) if total_answers > 0 else 0
-
-                message += f"{medal} {user.user_name}\n"
-                message += f"   ❌ 错误: {user.wrong_count} | ✅ 正确: {user.correct_count} | 💡 提示: {user.tip_count}\n"
-                message += f"   📉 错误率: {error_rate:.1f}% | 📅 最后更新: {user.updated_at.strftime('%Y-%m-%d')}\n\n"
-
-            yield event.plain_result(message)
+            # 使用统一的图片/文本生成函数
+            async for result in self._generate_image_or_fallback(
+                    event=event,
+                    generate_image_func=lambda: self.renderer.generate_wrong_leaderboard_image(users),
+                    generate_text_func=lambda: self._generate_wrong_leaderboard_text(users),
+            ):
+                yield result
 
         except Exception as e:
             yield event.plain_result(f"获取排行榜时出现错误: {str(e)}")
@@ -295,29 +265,13 @@ class Mrfzccl(Star):
                 yield event.plain_result("📊 当前还没有用户的答题记录哦~")
                 return
 
-            # 构建排行榜消息
-            message = "💡 **提示次数排行榜** 💡\n\n"
-
-            for i, user in enumerate(users, 1):
-                medal = ""
-                if i == 1:
-                    medal = "🎯"  # 靶心表示最依赖提示
-                elif i == 2:
-                    medal = "🔍"
-                elif i == 3:
-                    medal = "🧩"
-                else:
-                    medal = f"{i}."
-
-                # 计算提示频率（每道题平均提示次数）
-                total_answers = user.correct_count + user.wrong_count
-                tips_per_question = (user.tip_count / total_answers) if total_answers > 0 else 0
-
-                message += f"{medal} {user.user_name}\n"
-                message += f"   💡 提示: {user.tip_count} | ✅ 正确: {user.correct_count} | ❌ 错误: {user.wrong_count}\n"
-                message += f"   📊 提示频率: {tips_per_question:.2f}/题 | 📅 最后更新: {user.updated_at.strftime('%Y-%m-%d')}\n\n"
-
-            yield event.plain_result(message)
+            # 使用统一的图片/文本生成函数
+            async for result in self._generate_image_or_fallback(
+                    event=event,
+                    generate_image_func=lambda: self.renderer.generate_hints_leaderboard_image(users),
+                    generate_text_func=lambda: self._generate_hints_leaderboard_text(users),
+            ):
+                yield result
 
         except Exception as e:
             yield event.plain_result(f"获取排行榜时出现错误: {str(e)}")
@@ -337,35 +291,165 @@ class Mrfzccl(Star):
                 yield event.plain_result("❌ 未找到该用户的答题记录")
                 return
 
-            # 构建个人信息消息
-            message = f"👤 **用户信息 - {user_stats.user_name}**\n\n"
-
-            # 基础统计
-            total_answers = user_stats.correct_count + user_stats.wrong_count
-            accuracy = (user_stats.correct_count / total_answers * 100) if total_answers > 0 else 0
-
-            message += f"📊 **基础统计**\n"
-            message += f"✅ 正确: {user_stats.correct_count}\n"
-            message += f"❌ 错误: {user_stats.wrong_count}\n"
-            message += f"💡 提示: {user_stats.tip_count}\n"
-            message += f"🎯 准确率: {accuracy:.1f}%\n"
-            message += f"📝 总答题数: {total_answers}\n\n"
-
-            # 排名信息
-            message += f"🏆 **排名信息** (共{rank_info['total_users']}人)\n"
-            message += f"✅ 正确排名: 第{rank_info['correct_rank']}名\n"
-            message += f"❌ 错误排名: 第{rank_info['wrong_rank']}名\n"
-            message += f"💡 提示排名: 第{rank_info['tip_rank']}名\n\n"
-
-            # 时间信息
-            message += f"📅 **时间信息**\n"
-            message += f"⏰ 注册时间: {user_stats.created_at.strftime('%Y-%m-%d %H:%M')}\n"
-            message += f"🔄 最后更新: {user_stats.updated_at.strftime('%Y-%m-%d %H:%M')}\n"
-
-            yield event.plain_result(message)
+            # 使用统一的图片/文本生成函数
+            async for result in self._generate_image_or_fallback(
+                    event=event,
+                    generate_image_func=lambda: self.renderer.generate_user_profile_image(user_stats, rank_info),
+                    generate_text_func=lambda: self._generate_user_profile_text(user_stats, rank_info),
+            ):
+                yield result
 
         except Exception as e:
             yield event.plain_result(f"获取用户信息时出现错误: {str(e)}")
+
+    # ========== 排行榜相关函数 ==========
+    # 生成正确量排行榜文本
+    def _generate_correct_leaderboard_text(self, users, summary=None):
+        """生成正确量排行榜文本"""
+        if not users:
+            return "📊 当前还没有用户的答题记录哦~"
+
+        message = "🏆 **正确量排行榜** 🏆\n\n"
+
+        for i, user in enumerate(users, 1):
+            if i == 1:
+                medal = "🥇"
+            elif i == 2:
+                medal = "🥈"
+            elif i == 3:
+                medal = "🥉"
+            else:
+                medal = f"{i}."
+
+            # 计算准确率
+            total_answers = user.correct_count + user.wrong_count
+            accuracy = (user.correct_count / total_answers * 100) if total_answers > 0 else 0
+
+            message += f"{medal} {user.user_name}\n"
+            message += f"   ✅ 正确: {user.correct_count} | ❌ 错误: {user.wrong_count} | 💡 提示: {user.tip_count}\n"
+            message += f"   📈 准确率: {accuracy:.1f}% | 📅 最后更新: {user.updated_at.strftime('%Y-%m-%d')}\n\n"
+
+        # 添加统计信息（如果提供了summary）
+        if summary:
+            message += f"📊 **统计信息**\n"
+            message += f"总用户数: {summary['total_users']} | 总答题数: {summary['total_questions']}\n"
+            message += f"总正确数: {summary['total_correct']} | 总错误数: {summary['total_wrong']}\n"
+            message += f"平均正确数: {summary['avg_correct']:.1f}"
+
+        return message
+
+    # 生成错误个数排行榜文本
+    def _generate_wrong_leaderboard_text(self, users):
+        """生成错误个数排行榜文本"""
+        if not users:
+            return "📊 当前还没有用户的答题记录哦~"
+
+        message = "💥 **错误个数排行榜** 💥\n\n"
+
+        for i, user in enumerate(users, 1):
+            medal = ""
+            if i == 1:
+                medal = "💣"  # 炸弹表示错误最多
+            elif i == 2:
+                medal = "🧨"
+            elif i == 3:
+                medal = "🎆"
+            else:
+                medal = f"{i}."
+
+            # 计算错误率
+            total_answers = user.correct_count + user.wrong_count
+            error_rate = (user.wrong_count / total_answers * 100) if total_answers > 0 else 0
+
+            message += f"{medal} {user.user_name}\n"
+            message += f"   ❌ 错误: {user.wrong_count} | ✅ 正确: {user.correct_count} | 💡 提示: {user.tip_count}\n"
+            message += f"   📉 错误率: {error_rate:.1f}% | 📅 最后更新: {user.updated_at.strftime('%Y-%m-%d')}\n\n"
+
+        return message
+
+    # 生成提示次数排行榜文本
+    def _generate_hints_leaderboard_text(self, users):
+        """生成提示次数排行榜文本"""
+        if not users:
+            return "📊 当前还没有用户的答题记录哦~"
+
+        message = "💡 **提示次数排行榜** 💡\n\n"
+
+        for i, user in enumerate(users, 1):
+            medal = ""
+            if i == 1:
+                medal = "🎯"  # 靶心表示最依赖提示
+            elif i == 2:
+                medal = "🔍"
+            elif i == 3:
+                medal = "🧩"
+            else:
+                medal = f"{i}."
+
+            # 计算提示频率（每道题平均提示次数）
+            total_answers = user.correct_count + user.wrong_count
+            tips_per_question = (user.tip_count / total_answers) if total_answers > 0 else 0
+
+            message += f"{medal} {user.user_name}\n"
+            message += f"   💡 提示: {user.tip_count} | ✅ 正确: {user.correct_count} | ❌ 错误: {user.wrong_count}\n"
+            message += f"   📊 提示频率: {tips_per_question:.2f}/题 | 📅 最后更新: {user.updated_at.strftime('%Y-%m-%d')}\n\n"
+
+        return message
+
+    # 生成用户个人信息文本
+    def _generate_user_profile_text(self, user_stats, rank_info):
+        """生成用户个人信息文本"""
+        if not user_stats:
+            return "❌ 未找到该用户的答题记录"
+
+        # 构建个人信息消息
+        message = f"👤 **用户信息 - {user_stats.user_name}**\n\n"
+
+        # 基础统计
+        total_answers = user_stats.correct_count + user_stats.wrong_count
+        accuracy = (user_stats.correct_count / total_answers * 100) if total_answers > 0 else 0
+
+        message += f"📊 **基础统计**\n"
+        message += f"✅ 正确: {user_stats.correct_count}\n"
+        message += f"❌ 错误: {user_stats.wrong_count}\n"
+        message += f"💡 提示: {user_stats.tip_count}\n"
+        message += f"🎯 准确率: {accuracy:.1f}%\n"
+        message += f"📝 总答题数: {total_answers}\n\n"
+
+        # 排名信息
+        if rank_info:
+            message += f"🏆 **排名信息** (共{rank_info.get('total_users', '?')}人)\n"
+            message += f"✅ 正确排名: 第{rank_info.get('correct_rank', '?')}名\n"
+            message += f"❌ 错误排名: 第{rank_info.get('wrong_rank', '?')}名\n"
+            message += f"💡 提示排名: 第{rank_info.get('tip_rank', '?')}名\n\n"
+
+        # 时间信息
+        message += f"📅 **时间信息**\n"
+        message += f"⏰ 注册时间: {user_stats.created_at.strftime('%Y-%m-%d %H:%M')}\n"
+        message += f"🔄 最后更新: {user_stats.updated_at.strftime('%Y-%m-%d %H:%M')}\n"
+
+        return message
+
+    # 统一的图片生成和回退处理
+    async def _generate_image_or_fallback(self, event, generate_image_func, generate_text_func, *args, **kwargs):
+        """统一的图片生成和回退处理"""
+        try:
+            # 尝试生成图片
+            image_path = await generate_image_func(*args, **kwargs)
+
+            # 检查图片是否存在
+            if os.path.exists(image_path):
+                yield event.chain_result([Comp.Image.fromFileSystem(image_path)])
+                return
+
+            # 图片不存在，使用文本模式
+            text_message = generate_text_func(*args, **kwargs)
+            yield event.plain_result(f"图片生成失败，使用文本模式显示\n\n{text_message}")
+
+        except Exception as render_error:
+            # 生成图片出错，使用文本模式
+            text_message = generate_text_func(*args, **kwargs)
+            yield event.plain_result(f"图片生成失败，使用文本模式显示\n错误: {str(render_error)}\n\n{text_message}")
 
     # 发送原始图片
     async def send_original_image(self, user_id: str, event: AstrMessageEvent):
@@ -548,6 +632,7 @@ class Mrfzccl(Star):
             cleaned = cleaned[:50]
         return cleaned
 
+    # 遮挡图生成
     def mask_image_with_random_blocks(
             self,
             image: Image.Image,
@@ -634,6 +719,7 @@ class Mrfzccl(Star):
         new_h = max(new_h, 100)
         return image.resize((new_w, new_h), Image.Resampling.LANCZOS)
 
+    # pil图片转变为bytes
     def pil_image_to_bytes(self, image: Image.Image, format: str = "PNG") -> bytes:
         buf = BytesIO()
         image.save(buf, format=format, optimize=True)
