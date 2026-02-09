@@ -24,10 +24,10 @@ class QnAStatsRenderer:
 
     BASE_HEIGHT = 220
     TABLE_HEADER_HEIGHT = 52
-    TABLE_ROW_HEIGHT = 44
+    TABLE_ROW_HEIGHT = 49
     SAFE_PADDING = 80
 
-    USER_PROFILE_HEIGHT = 900
+    USER_PROFILE_HEIGHT = 750
 
     # ======================= init =======================
 
