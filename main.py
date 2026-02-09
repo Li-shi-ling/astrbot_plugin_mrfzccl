@@ -764,7 +764,7 @@ class Mrfzccl(Star):
                 break
             except Exception as e:
                 # 记录错误但不停止任务
-                logger(f"[Mrfzccl] 清理任务出错: {e}")
+                logger.error(f"[Mrfzccl] 清理任务出错: {e}")
                 await asyncio.sleep(60)  # 出错后等待1分钟再重试
 
     # 清理超过指定时间的图片
@@ -777,11 +777,11 @@ class Mrfzccl(Star):
                 if os.path.getmtime(file_path) < cutoff_time:
                     try:
                         os.remove(file_path)
-                        print(f"🧹 清理旧图片: {file_path}")
+                        logger.info(f"🧹 清理旧图片: {file_path}")
                     except:
                         pass
         except Exception as e:
-            print(f"清理图片时出错: {e}")
+            logger.error(f"清理图片时出错: {e}")
 
     # 获取或创建 HTTP 会话
     async def _get_session(self) -> aiohttp.ClientSession:
