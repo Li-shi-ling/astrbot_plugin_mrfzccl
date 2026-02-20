@@ -1,8 +1,9 @@
 import asyncio
+import base64
 import html
 from datetime import datetime
 from pathlib import Path
-from typing import Any, List, Mapping
+from typing import Any, Dict, List, Mapping, Optional
 
 try:
     from html2image import Html2Image
@@ -10,6 +11,13 @@ try:
     HTML2IMAGE_AVAILABLE = True
 except ImportError:
     HTML2IMAGE_AVAILABLE = False
+
+try:
+    import aiohttp
+
+    AIOHTTP_AVAILABLE = True
+except ImportError:
+    AIOHTTP_AVAILABLE = False
 
 from .db.tables import UserQnAStats
 
@@ -42,6 +50,9 @@ class QnAStatsRenderer:
 
         if not HTML2IMAGE_AVAILABLE:
             raise ImportError("Html2Image包未安装，无法生成图片。请安装：pip install html2image")
+
+        self._avatar_concurrency = 8
+        self._avatar_timeout_seconds = 4
 
     # ======================= helpers =======================
 
@@ -79,6 +90,73 @@ class QnAStatsRenderer:
         elif rank == 3:
             classes.append("rank-3")
         return f'<span class="{" ".join(classes)}">{self._esc(label)}</span>'
+
+    @staticmethod
+    def _avatar_url(user_id: Any) -> str:
+        return f"https://q1.qlogo.cn/g?b=qq&nk={user_id}&s=640"
+
+    @staticmethod
+    def _pick_avatar_char(user_name: Any) -> str:
+        text = str(user_name or "")
+        return text[:1] if text else "U"
+
+    async def _fetch_avatar_data_url(self, session: "aiohttp.ClientSession", user_id: str) -> Optional[str]:
+        try:
+            url = self._avatar_url(user_id)
+            async with session.get(url) as resp:
+                if resp.status != 200:
+                    return None
+                content_type = (resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+                if not content_type.startswith("image/"):
+                    content_type = "image/png"
+                data = await resp.read()
+                if not data:
+                    return None
+            b64 = base64.b64encode(data).decode("ascii")
+            return f"data:{content_type};base64,{b64}"
+        except Exception:
+            return None
+
+    async def _download_avatar_map(self, user_ids: List[Any]) -> Dict[str, str]:
+        """
+        并行下载头像并返回 data-url 映射。
+        - 下载失败：不返回该 key（调用方自行降级为首字头像）
+        """
+        unique_ids: List[str] = []
+        seen: set[str] = set()
+        for raw_id in user_ids:
+            uid = str(raw_id or "").strip()
+            if not uid or uid in seen:
+                continue
+            seen.add(uid)
+            unique_ids.append(uid)
+
+        if not unique_ids or not AIOHTTP_AVAILABLE:
+            return {}
+
+        timeout = aiohttp.ClientTimeout(total=self._avatar_timeout_seconds)
+        connector = aiohttp.TCPConnector(limit=self._avatar_concurrency * 2, limit_per_host=self._avatar_concurrency)
+        headers = {"User-Agent": "Mozilla/5.0"}
+
+        sem = asyncio.Semaphore(self._avatar_concurrency)
+
+        async with aiohttp.ClientSession(timeout=timeout, connector=connector, headers=headers) as session:
+            async def worker(uid: str) -> Optional[tuple[str, str]]:
+                async with sem:
+                    data_url = await self._fetch_avatar_data_url(session, uid)
+                    if not data_url:
+                        return None
+                    return uid, data_url
+
+            results = await asyncio.gather(*(worker(uid) for uid in unique_ids), return_exceptions=False)
+
+        avatar_map: Dict[str, str] = {}
+        for item in results:
+            if not item:
+                continue
+            uid, data_url = item
+            avatar_map[uid] = data_url
+        return avatar_map
 
     # ======================= CSS =======================
 
@@ -314,6 +392,28 @@ class QnAStatsRenderer:
             gap: 10px;
             min-width: 0;
         }
+        .avatar-sm{
+            width: 30px;
+            height: 30px;
+            border-radius: 10px;
+            border: 1px solid var(--line);
+            background:
+              linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            font-weight: 900;
+            font-size: 14px;
+            color: var(--accent);
+            flex: 0 0 auto;
+            overflow: hidden;
+        }
+        .avatar-sm img{
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
         .name{
             display:block;
             overflow:hidden;
@@ -407,6 +507,16 @@ class QnAStatsRenderer:
             font-size: 22px;
             color: var(--accent);
             flex: 0 0 auto;
+            overflow: hidden;
+        }
+        .avatar.avatar--img{
+            padding: 0;
+        }
+        .avatar-img-lg{
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
         }
         .profile-main{
             flex: 1 1 auto;
@@ -604,6 +714,7 @@ class QnAStatsRenderer:
         title: str,
         sort_key: str,
         mode: str,
+        avatar_map: Mapping[str, str],
     ) -> str:
         sorted_users = sorted(
             users,
@@ -649,6 +760,14 @@ class QnAStatsRenderer:
             acc = (correct / total) if total else 0.0
             acc_pct = acc * 100.0
 
+            user_name_raw = getattr(u, "user_name", "-")
+            user_id_raw = str(getattr(u, "user_id", "") or "").strip()
+            avatar_data_url = avatar_map.get(user_id_raw)
+            if avatar_data_url:
+                avatar_html = f'<div class="avatar-sm"><img src="{self._esc(avatar_data_url)}" /></div>'
+            else:
+                avatar_html = f'<div class="avatar-sm">{self._esc(self._pick_avatar_char(user_name_raw))}</div>'
+
             row_class = []
             if idx == 1:
                 row_class.append("top1")
@@ -657,7 +776,7 @@ class QnAStatsRenderer:
             rank_cell = f'<td class="col-rank">{self._rank_badge(idx)}</td>'
             user_cell = f"""
               <td class="col-user">
-                <div class="user"><span class="name">{self._esc(getattr(u, "user_name", "-"))}</span></div>
+                <div class="user">{avatar_html}<span class="name">{self._esc(user_name_raw)}</span></div>
               </td>
             """
 
@@ -717,6 +836,78 @@ class QnAStatsRenderer:
         """
 
     def _build_user_profile_body(self, u: UserQnAStats, rank: Mapping[str, Any]) -> str:
+        return self._build_user_profile_body_with_avatar(u, rank, avatar_data_url=None)
+
+    # ======================= Public APIs =======================
+
+    async def generate_correct_leaderboard_image(self, users: List[UserQnAStats]) -> str:
+        avatar_map = await self._download_avatar_map([getattr(u, "user_id", "") for u in users])
+        body = self._build_leaderboard_body(
+            users,
+            title="正确次数排行榜",
+            sort_key="correct_count",
+            mode="correct",
+            avatar_map=avatar_map,
+        )
+        height = self._calc_table_height(len(users))
+        name = f"correct_leaderboard_{datetime.now():%Y%m%d_%H%M%S}"
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: self.render_to_image(body, name, "正确次数排行榜", height),
+        )
+
+    async def generate_wrong_leaderboard_image(self, users: List[UserQnAStats]) -> str:
+        avatar_map = await self._download_avatar_map([getattr(u, "user_id", "") for u in users])
+        body = self._build_leaderboard_body(
+            users,
+            title="错误次数排行榜",
+            sort_key="wrong_count",
+            mode="wrong",
+            avatar_map=avatar_map,
+        )
+        height = self._calc_table_height(len(users))
+        name = f"wrong_leaderboard_{datetime.now():%Y%m%d_%H%M%S}"
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: self.render_to_image(body, name, "错误次数排行榜", height),
+        )
+
+    async def generate_hints_leaderboard_image(self, users: List[UserQnAStats]) -> str:
+        avatar_map = await self._download_avatar_map([getattr(u, "user_id", "") for u in users])
+        body = self._build_leaderboard_body(
+            users,
+            title="提示次数排行榜",
+            sort_key="tip_count",
+            mode="hints",
+            avatar_map=avatar_map,
+        )
+        height = self._calc_table_height(len(users))
+        name = f"hints_leaderboard_{datetime.now():%Y%m%d_%H%M%S}"
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: self.render_to_image(body, name, "提示次数排行榜", height),
+        )
+
+    async def generate_user_profile_image(self, user_stats: UserQnAStats, rank_info: Mapping[str, Any]) -> str:
+        avatar_map = await self._download_avatar_map([getattr(user_stats, "user_id", "")])
+        avatar_data_url = avatar_map.get(str(getattr(user_stats, "user_id", "") or "").strip())
+        body = self._build_user_profile_body_with_avatar(user_stats, rank_info, avatar_data_url)
+        name = f"user_profile_{getattr(user_stats, 'user_id', 'unknown')}_{datetime.now():%Y%m%d_%H%M%S}"
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: self.render_to_image(body, name, "用户信息", self.USER_PROFILE_HEIGHT),
+        )
+
+    def _build_user_profile_body_with_avatar(
+        self,
+        u: UserQnAStats,
+        rank: Mapping[str, Any],
+        avatar_data_url: Optional[str],
+    ) -> str:
         user_name_raw = getattr(u, "user_name", "-")
         user_id_raw = getattr(u, "user_id", "-")
 
@@ -730,15 +921,21 @@ class QnAStatsRenderer:
         created_at = self._fmt_dt(getattr(u, "created_at", None))
         updated_at = self._fmt_dt(getattr(u, "updated_at", None))
 
-        avatar_char = str(user_name_raw)[:1] if str(user_name_raw) else "U"
+        avatar_char = self._pick_avatar_char(user_name_raw)
 
         correct_rank = rank.get("correct_rank", "-")
         wrong_rank = rank.get("wrong_rank", "-")
         tip_rank = rank.get("tip_rank", "-")
 
+        avatar_block = (
+            f'<div class="avatar avatar--img"><img class="avatar-img-lg" src="{self._esc(avatar_data_url)}" /></div>'
+            if avatar_data_url
+            else f'<div class="avatar">{self._esc(avatar_char)}</div>'
+        )
+
         return f"""
         <div class="profile-head">
-          <div class="avatar">{self._esc(avatar_char)}</div>
+          {avatar_block}
           <div class="profile-main">
             <div class="kicker">USER PROFILE</div>
             <div class="profile-title">{self._esc(user_name_raw)}</div>
@@ -784,44 +981,3 @@ class QnAStatsRenderer:
           </div>
         </div>
         """
-
-    # ======================= Public APIs =======================
-
-    async def generate_correct_leaderboard_image(self, users: List[UserQnAStats]) -> str:
-        body = self._build_leaderboard_body(users, title="正确次数排行榜", sort_key="correct_count", mode="correct")
-        height = self._calc_table_height(len(users))
-        name = f"correct_leaderboard_{datetime.now():%Y%m%d_%H%M%S}"
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None,
-            lambda: self.render_to_image(body, name, "正确次数排行榜", height),
-        )
-
-    async def generate_wrong_leaderboard_image(self, users: List[UserQnAStats]) -> str:
-        body = self._build_leaderboard_body(users, title="错误次数排行榜", sort_key="wrong_count", mode="wrong")
-        height = self._calc_table_height(len(users))
-        name = f"wrong_leaderboard_{datetime.now():%Y%m%d_%H%M%S}"
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None,
-            lambda: self.render_to_image(body, name, "错误次数排行榜", height),
-        )
-
-    async def generate_hints_leaderboard_image(self, users: List[UserQnAStats]) -> str:
-        body = self._build_leaderboard_body(users, title="提示次数排行榜", sort_key="tip_count", mode="hints")
-        height = self._calc_table_height(len(users))
-        name = f"hints_leaderboard_{datetime.now():%Y%m%d_%H%M%S}"
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None,
-            lambda: self.render_to_image(body, name, "提示次数排行榜", height),
-        )
-
-    async def generate_user_profile_image(self, user_stats: UserQnAStats, rank_info: Mapping[str, Any]) -> str:
-        body = self._build_user_profile_body(user_stats, rank_info)
-        name = f"user_profile_{getattr(user_stats, 'user_id', 'unknown')}_{datetime.now():%Y%m%d_%H%M%S}"
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None,
-            lambda: self.render_to_image(body, name, "用户信息", self.USER_PROFILE_HEIGHT),
-        )
