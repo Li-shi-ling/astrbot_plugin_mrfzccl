@@ -16,10 +16,11 @@ from .db.tables import UserQnAStats
 
 class QnAStatsRenderer:
     """
-    工业风问答统计图片渲染器（HTML -> Image）。
+    问答统计图片渲染器（HTML -> Image）。
 
     设计目标：
-    - 工业风格 UI（深色面板 / 网格纹理 / 高对比强调色）
+    - 白天（浅色）样式默认，更适合群聊阅读
+    - 可选工业（深色）主题
     - 删除 markdown-it-py 依赖：避免 Markdown 渲染与潜在的 HTML 注入
     - 对外接口保持兼容：generate_*_image
     """
@@ -33,11 +34,11 @@ class QnAStatsRenderer:
 
     USER_PROFILE_HEIGHT = 820
 
-    def __init__(self, output_dir: str = "data/quiz_images", theme: str = "industrial"):
+    def __init__(self, output_dir: str = "data/quiz_images", theme: str = "light"):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        self.theme = (theme or "industrial").strip().lower()
+        self.theme = (theme or "light").strip().lower()
 
         if not HTML2IMAGE_AVAILABLE:
             raise ImportError("Html2Image包未安装，无法生成图片。请安装：pip install html2image")
@@ -98,6 +99,10 @@ class QnAStatsRenderer:
               --good:#16a34a;
               --bad:#e11d48;
               --warn:#b45309;
+              --glow1: rgba(14,165,233,0.10);
+              --glow2: rgba(245,158,11,0.08);
+              --grid: rgba(2,6,23,0.045);
+              --stripe: rgba(2,6,23,0.06);
             }
             </style>
             """
@@ -118,6 +123,10 @@ class QnAStatsRenderer:
           --good:#34d399;
           --bad:#fb7185;
           --warn:#fbbf24;
+          --glow1: rgba(34,211,238,0.14);
+          --glow2: rgba(251,191,36,0.10);
+          --grid: rgba(148,163,184,0.06);
+          --stripe: rgba(251,191,36,0.08);
         }
         </style>
         """
@@ -145,8 +154,8 @@ class QnAStatsRenderer:
             padding: 18px;
             position: relative;
             background:
-              radial-gradient(1100px 520px at 10% 0%, rgba(34,211,238,0.14), transparent 60%),
-              radial-gradient(900px 520px at 90% 10%, rgba(251,191,36,0.10), transparent 55%),
+              radial-gradient(1100px 520px at 10% 0%, var(--glow1), transparent 60%),
+              radial-gradient(900px 520px at 90% 10%, var(--glow2), transparent 55%),
               linear-gradient(180deg, var(--bg0), var(--bg1));
         }
         .content-container::before{
@@ -155,8 +164,8 @@ class QnAStatsRenderer:
             inset:0;
             z-index:0;
             background-image:
-              linear-gradient(to right, rgba(148,163,184,0.06) 1px, transparent 1px),
-              linear-gradient(to bottom, rgba(148,163,184,0.06) 1px, transparent 1px);
+              linear-gradient(to right, var(--grid) 1px, transparent 1px),
+              linear-gradient(to bottom, var(--grid) 1px, transparent 1px);
             background-size: 48px 48px;
             opacity: 0.55;
             pointer-events:none;
@@ -191,7 +200,7 @@ class QnAStatsRenderer:
             z-index:0;
             background:
               repeating-linear-gradient(135deg,
-                rgba(251,191,36,0.08) 0 10px,
+                var(--stripe) 0 10px,
                 rgba(0,0,0,0) 10px 26px);
             opacity: 0.08;
             pointer-events:none;
