@@ -195,7 +195,7 @@ class Mrfzccl(Star):
     # 获取正确个数的排行榜
     @ccl.command("ccl 排行榜")
     async def correct_answers_leaderboard(self, event: AstrMessageEvent):
-        """获取正确个数的排行榜 /cal"""
+        """获取正确个数的排行榜 /ccl 排行榜"""
         try:
             # 获取排行榜数据（前10名）
             users = await self.user_qna_repo.get_correct_answers_leaderboard(limit=10)
@@ -221,7 +221,7 @@ class Mrfzccl(Star):
     # 获取错误个数的排行榜
     @ccl.command("错误排行榜")
     async def wrong_answers_leaderboard(self, event: AstrMessageEvent):
-        """获取错误个数的排行榜 /wal"""
+        """获取错误个数的排行榜 /ccl 错误排行榜"""
         try:
             # 获取排行榜数据（前10名）
             users = await self.user_qna_repo.get_wrong_answers_leaderboard(limit=10)
@@ -244,7 +244,7 @@ class Mrfzccl(Star):
     # 获取使用提示次数的排行榜
     @ccl.command("提示排行榜")
     async def hints_usage_leaderboard(self, event: AstrMessageEvent):
-        """获取使用提示次数的排行榜 /hul"""
+        """获取使用提示次数的排行榜 /ccl 提示排行榜"""
         try:
             # 获取排行榜数据（前10名）
             users = await self.user_qna_repo.get_hints_usage_leaderboard(limit=10)
@@ -267,7 +267,7 @@ class Mrfzccl(Star):
     # 获取个人信息获取
     @ccl.command("名片")
     async def user_profile_retrieval(self, event: AstrMessageEvent, user_id: str | None = None):
-        """获取个人信息获取 /upr [user_id] (如果user_id为空默认为发送人)"""
+        """获取个人信息获取 /ccl 名片 [user_id] (如果user_id为空默认为发送人)"""
         try:
             # 确定用户ID
             target_user_id = user_id or event.get_sender_id()
