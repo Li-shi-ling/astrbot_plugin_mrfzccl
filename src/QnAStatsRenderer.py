@@ -40,7 +40,7 @@ class QnAStatsRenderer:
     TABLE_ROW_HEIGHT = 46
     SAFE_PADDING = 120
 
-    USER_PROFILE_HEIGHT = 820
+    USER_PROFILE_HEIGHT = 580
 
     def __init__(self, output_dir: str = "data/quiz_images", theme: str = "light"):
         self.output_dir = Path(output_dir)
