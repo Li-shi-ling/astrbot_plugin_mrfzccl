@@ -193,7 +193,7 @@ class Mrfzccl(Star):
         pass
 
     # 获取正确个数的排行榜
-    @ccl.command("ccl 排行榜")
+    @ccl.command("排行榜")
     async def correct_answers_leaderboard(self, event: AstrMessageEvent):
         """获取正确个数的排行榜 /ccl 排行榜"""
         try:
