@@ -76,7 +76,7 @@
 
 ### 前置要求
 - AstrBot 框架
-- 依赖包：`html2image`, `numpy`, `markdown-it-py`
+- 依赖包：`html2image`, `numpy`
 
 ## ❓ 常见问题
 
