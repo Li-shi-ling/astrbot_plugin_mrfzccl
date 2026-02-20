@@ -188,8 +188,12 @@ class Mrfzccl(Star):
             user_name=event.get_sender_name()
         )
 
+    @filter.command_group("ccl")
+    def ccl(self):
+        pass
+
     # 获取正确个数的排行榜
-    @filter.command("cal")
+    @ccl.command("ccl 排行榜")
     async def correct_answers_leaderboard(self, event: AstrMessageEvent):
         """获取正确个数的排行榜 /cal"""
         try:
@@ -215,7 +219,7 @@ class Mrfzccl(Star):
             yield event.plain_result(f"获取排行榜时出现错误: {str(e)}")
 
     # 获取错误个数的排行榜
-    @filter.command("wal")
+    @ccl.command("错误排行榜")
     async def wrong_answers_leaderboard(self, event: AstrMessageEvent):
         """获取错误个数的排行榜 /wal"""
         try:
@@ -238,7 +242,7 @@ class Mrfzccl(Star):
             yield event.plain_result(f"获取排行榜时出现错误: {str(e)}")
 
     # 获取使用提示次数的排行榜
-    @filter.command("hul")
+    @ccl.command("提示排行榜")
     async def hints_usage_leaderboard(self, event: AstrMessageEvent):
         """获取使用提示次数的排行榜 /hul"""
         try:
@@ -261,7 +265,7 @@ class Mrfzccl(Star):
             yield event.plain_result(f"获取排行榜时出现错误: {str(e)}")
 
     # 获取个人信息获取
-    @filter.command("upr")
+    @ccl.command("名片")
     async def user_profile_retrieval(self, event: AstrMessageEvent, user_id: str | None = None):
         """获取个人信息获取 /upr [user_id] (如果user_id为空默认为发送人)"""
         try:
