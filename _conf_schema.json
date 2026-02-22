@@ -10,5 +10,17 @@
     "type": "int",
     "default": 512,
     "hint": "例如：512"
+  },
+  "similarity_threshold": {
+    "description": "判断是否正确的阈值,语义的相似度,越高判断的要求越高",
+    "type": "float",
+    "default": 0.5,
+    "hint": "(0.-1.)"
+  },
+  "calculate_threshold": {
+    "description": "判断是否正确的阈值,字的准确率(与位置无关仅判断字是否正确),越高判断的要求越高",
+    "type": "float",
+    "default": 0.5,
+    "hint": "(0.-1.)"
   }
 }

@@ -2,6 +2,7 @@ from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
 from typing import Optional, Dict, Any, Tuple, List
 from .src.QnAStatsRenderer import QnAStatsRenderer
+from .src.tool import calculate_char_coverage_set
 import astrbot.api.message_components as Comp
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.star import StarTools
@@ -35,6 +36,9 @@ class Mrfzccl(Star):
             1 : "阵营",
             2 : "性别",
         }
+
+        self.similarity_threshold = self.Config.get("similarity_threshold", 0.5)
+        self.calculate_threshold = self.Config.get("calculate_threshold", 0.5)
 
         # 添加 HTTP 会话管理
         self._session: Optional[aiohttp.ClientSession] = None
@@ -128,8 +132,8 @@ class Mrfzccl(Star):
             return
         correct_name = self.player[user_id]["name"]
         similarity = SequenceMatcher(None, correct_name, guess_text).ratio()
-        threshold = 0.5
-        if similarity > threshold:
+        calculate = calculate_char_coverage_set(correct_name, guess_text)
+        if (similarity > self.similarity_threshold) or (calculate > self.calculate_threshold):
             chain = [
                 Comp.At(qq=event.get_sender_id()),
                 Comp.Plain(f"回答正确! 答案为: {correct_name}")
