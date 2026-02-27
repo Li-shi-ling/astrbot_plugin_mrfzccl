@@ -837,14 +837,16 @@ class MatchRepo:
     async def get_active_match(self, group_id: str) -> Optional[Match]:
         async with self.db.get_session() as session:
             stmt = select(Match).where(
-                and_(Match.group_id == group_id, Match.is_active == True)
+                and_(Match.group_id == group_id, Match.is_active)
             )
             result = await session.execute(stmt)
             return result.scalar_one_or_none()
 
     async def start_match(self, match_id: int):
         async with self.db.get_session() as session:
-            stmt = select(Match).where(Match.match_id == match_id)
+            stmt = select(Match).where(
+                Match.match_id == match_id
+            )
             result = await session.execute(stmt)
             match = result.scalar_one_or_none()
             if match:
@@ -854,7 +856,9 @@ class MatchRepo:
 
     async def end_match(self, match_id: int):
         async with self.db.get_session() as session:
-            stmt = select(Match).where(Match.match_id == match_id)
+            stmt = select(Match).where(
+                Match.match_id == match_id
+            )
             result = await session.execute(stmt)
             match = result.scalar_one_or_none()
             if match:
