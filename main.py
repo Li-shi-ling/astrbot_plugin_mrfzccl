@@ -7,7 +7,7 @@ import astrbot.api.message_components as Comp
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.star import StarTools
 from .src.db.database import DBManager
-from .src.db.repo import UserQnARepo
+from .src.db.repo import UserQnARepo, MatchRepo
 from difflib import SequenceMatcher
 from urllib.parse import urlparse
 from io import BytesIO
@@ -21,6 +21,7 @@ import json
 import time
 import os
 import re
+from pypinyin import lazy_pinyin, Style
 
 @register("mrfzccl", "Lishining", "你知道的,我一直是明日方舟高手", "1.0.0")
 class Mrfzccl(Star):
@@ -32,44 +33,97 @@ class Mrfzccl(Star):
         self.is_load = False
         self._shutting_down = False  # 添加关闭标志
         self.fct_key = {
-            0 : "职业分支",
-            1 : "阵营",
-            2 : "性别",
+            0 : "职业及分支",
+            1 : "星级",
+            2 : "阵营",
+            3 : "获取方式",
         }
 
         self.similarity_threshold = self.Config.get("similarity_threshold", 0.5)
         self.calculate_threshold = self.Config.get("calculate_threshold", 0.5)
+        self.enable_homophone = self.Config.get("enable_homophone", False)
+        
+        # 每日限制配置
+        self.daily_limit = self.Config.get("daily_game_limit", 10)
+        self.daily_usage: dict = {}
+        self.daily_counter: dict = {}
+
+        # 比赛状态追踪
+        self.match_question_state: dict = {}
+        self.match_next_task: dict = {}
+
+        # 防重复配置
+        self.recent_characters: list = []
+        self.max_recent_count = 20
+
+        # 别名系统
+        self.alias_map: dict = {}
+        self._load_aliases()
+
+        # 低权重干员
+        self.low_weight_keywords = self.Config.get("low_weight_characters", "预备干员,机师,W,SideStory").split(",")
+        self.low_weight_ratio = self.Config.get("low_weight_ratio", 0.2)
 
         # 添加 HTTP 会话管理
         self._session: Optional[aiohttp.ClientSession] = None
         self._executor = None  # 线程池执行器
 
-        self.db_path = str(StarTools.get_data_dir() / "mrfzccl.db")
+        # 获取存储目录配置
+        self.storage_dir = self.Config.get("storage_dir", "./plugin_data")
+        # 如果是相对路径，将其转换为绝对路径
+        if not os.path.isabs(self.storage_dir):
+            # 获取插件所在目录
+            plugin_dir = os.path.dirname(os.path.abspath(__file__))
+            self.storage_dir = os.path.join(plugin_dir, self.storage_dir)
+        logger.info(f"[Mrfzccl] 存储目录: {self.storage_dir}")
+        
+        # 确保存储目录存在
+        os.makedirs(self.storage_dir, exist_ok=True)
+        
+        # 构建数据库路径
+        self.db_dir = os.path.join(self.storage_dir, "db")
+        os.makedirs(self.db_dir, exist_ok=True)
+        self.db_path = os.path.join(self.db_dir, "mrfzccl.db")
         logger.debug(f"[Mrfzccl] 数据库使用 {self.db_path}")
         self.db = DBManager(
             db_path = self.db_path
         )
         self.user_qna_repo = UserQnARepo(self.db)
 
-        self.img_tmp_path = StarTools.get_data_dir() / "tmp"
+        # 比赛配置（需在db初始化后）
+        self.match_repo = MatchRepo(self.db)
+        self.match_question_limit = self.Config.get("match_question_limit", 0)
+        self.match_time_limit = self.Config.get("match_time_limit", 0)
+        self.admin_ids = self.Config.get("admin_ids", [])
+
+        # 构建临时图片路径
+        self.img_tmp_path = os.path.join(self.storage_dir, "tmp")
+        os.makedirs(self.img_tmp_path, exist_ok=True)
         self.renderer = QnAStatsRenderer(
-            output_dir = str(self.img_tmp_path)
+            output_dir = self.img_tmp_path
         )
 
         # 设置默认配置
         self.target_size = self.Config.get("target_size", 128)
-        data_path = self.Config.get("mrfz_data_path", "")
+        self.easy_probability = self.Config.get("easy_probability", 0.6)
+        self.medium_probability = self.Config.get("medium_probability", 0.3)
+        self.hard_probability = self.Config.get("hard_probability", 0.1)
+        
+        # 构建数据文件路径
+        data_file_name = self.Config.get("mrfz_data_path", "arknights_skins_dict.json")
+        data_path = os.path.join(self.storage_dir, data_file_name)
         if not data_path:
             logger.error("[Mrfzccl] 未配置数据文件路径")
             return
         try:
-            abs_data_path = self._get_absolute_path(data_path)
-            logger.info(f"[Mrfzccl] 尝试加载数据文件: {abs_data_path}")
-            if not os.path.exists(abs_data_path):
-                logger.error(f"[Mrfzccl] 数据文件不存在: {abs_data_path}")
+            logger.info(f"[Mrfzccl] 数据文件路径: {data_path}")
+            if not os.path.exists(data_path):
+                logger.error(f"[Mrfzccl] 数据文件不存在: {data_path}")
                 return
-            with open(abs_data_path, "r", encoding="utf-8") as f:
+            logger.info(f"[Mrfzccl] 数据文件存在，开始读取")
+            with open(data_path, "r", encoding="utf-8") as f:
                 self.data = json.load(f)
+            logger.info(f"[Mrfzccl] JSON解析成功")
             if not isinstance(self.data, dict):
                 logger.error("[Mrfzccl] 数据文件格式错误: 应为字典类型")
                 return
@@ -77,10 +131,13 @@ class Mrfzccl(Star):
             logger.info(f"[Mrfzccl] 数据加载成功，共加载 {len(self.data)} 个角色")
         except json.JSONDecodeError as e:
             logger.error(f"[Mrfzccl] JSON解析错误: {e}")
+            logger.error(traceback.format_exc())
         except FileNotFoundError as e:
             logger.error(f"[Mrfzccl] 文件未找到: {e}")
+            logger.error(traceback.format_exc())
         except PermissionError as e:
             logger.error(f"[Mrfzccl] 权限错误: {e}")
+            logger.error(traceback.format_exc())
         except Exception as e:
             logger.error(f"[Mrfzccl] 加载数据文件时发生未知错误: {e}")
             logger.error(traceback.format_exc())
@@ -99,6 +156,28 @@ class Mrfzccl(Star):
             ])
             return
         user_id = str(event.get_group_id() or event.get_sender_id())
+        group_id = str(event.get_group_id() or event.get_sender_id())
+        
+        # 确保数据库初始化
+        try:
+            await self.db.init_db()
+            logger.info("[Mrfzccl] 数据库初始化完成")
+        except Exception as e:
+            logger.error(f"[Mrfzccl] 数据库初始化失败: {e}")
+            yield event.chain_result([
+                Comp.At(qq=event.get_sender_id()),
+                Comp.Plain("数据库初始化失败，请联系管理员")
+            ])
+            return
+        
+        # 检查是否在比赛模式
+        match = await self.match_repo.get_active_match(group_id)
+        
+        # 非比赛模式下检查每日限制
+        if not match and not self.check_daily_limit(user_id):
+            yield event.plain_result(f"今日游戏次数已达上限({self.daily_limit}次)，请明天再来！")
+            return
+        
         try:
             result = await self.fc_init(user_id)
             if result == "already_exists":
@@ -120,9 +199,19 @@ class Mrfzccl(Star):
     async def fcc(self, event: AstrMessageEvent):
         """进行猜题 /fcc [干员名称]"""
         user_id = str(event.get_group_id() or event.get_sender_id())
+        group_id = str(event.get_group_id() or event.get_sender_id())
+        
+        logger.info(f"[fcc] user_id={user_id}, player_keys={list(self.player.keys())}, has_active={self.has_active_game(user_id)}")
+        
+        match = await self.match_repo.get_active_match(group_id)
+        
         if not self.has_active_game(user_id):
-            yield event.plain_result("没有初始化房间,请使用/fc")
+            if match:
+                yield event.plain_result("比赛期间请等待管理员发送题目")
+            else:
+                yield event.plain_result("没有初始化房间,请使用/fc")
             return
+        
         guess_text = self.extract_and_sanitize_input(event.message_str, "fcc")
         if not guess_text:
             yield event.chain_result([
@@ -131,28 +220,54 @@ class Mrfzccl(Star):
             ])
             return
         correct_name = self.player[user_id]["name"]
-        similarity = SequenceMatcher(None, correct_name, guess_text).ratio()
-        calculate = calculate_char_coverage_set(correct_name, guess_text)
-        if (similarity > self.similarity_threshold) or (calculate > self.calculate_threshold):
+        
+        # 解析别名
+        resolved_guess = self.resolve_alias(guess_text)
+        
+        similarity = SequenceMatcher(None, correct_name, resolved_guess).ratio()
+        calculate = calculate_char_coverage_set(correct_name, resolved_guess)
+        homophone_match = self.check_homophone(correct_name, resolved_guess)
+        is_correct = (similarity > self.similarity_threshold) or (calculate > self.calculate_threshold) or homophone_match
+        
+        logger.info(f"[答题判断] 正确答案: {correct_name}, 用户回答: {resolved_guess}, 相似度: {similarity:.2f}, 字匹配率: {calculate:.2f}, 同音匹配: {homophone_match}, 阈值: {self.similarity_threshold}/{self.calculate_threshold}, 结果: {is_correct}")
+        
+        sender_id = event.get_sender_id()
+        sender_name = event.get_sender_name()
+        
+        if match:
+            await self.match_repo.add_participant(match.match_id, str(sender_id), sender_name)
+            if is_correct:
+                await self.match_repo.increment_participant_score(match.match_id, str(sender_id))
+                self.match_question_state[group_id] = time.time()
+                
+                if group_id in self.match_next_task and self.match_next_task[group_id]:
+                    try:
+                        self.match_next_task[group_id].cancel()
+                    except:
+                        pass
+            else:
+                await self.match_repo.increment_participant_wrong(match.match_id, str(sender_id))
+        
+        if is_correct:
             chain = [
-                Comp.At(qq=event.get_sender_id()),
+                Comp.At(qq=sender_id),
                 Comp.Plain(f"回答正确! 答案为: {correct_name}")
             ]
             yield event.chain_result(chain)
             yield await self.send_original_image(user_id, event)
             await self.user_qna_repo.increment_correct_count(
-                user_id = event.get_sender_id(),
-                user_name = event.get_sender_name()
+                user_id = sender_id,
+                user_name = sender_name
             )
         else:
             chain = [
-                Comp.At(qq=event.get_sender_id()),
+                Comp.At(qq=sender_id),
                 Comp.Plain("回答错误!")
             ]
             yield event.chain_result(chain)
             await self.user_qna_repo.increment_wrong_count(
-                user_id = event.get_sender_id(),
-                user_name = event.get_sender_name()
+                user_id = sender_id,
+                user_name = sender_name
             )
 
     # 强制结束游戏
@@ -160,6 +275,14 @@ class Mrfzccl(Star):
     async def fce(self, event: AstrMessageEvent):
         """强置结束游戏 /fce"""
         user_id = str(event.get_group_id() or event.get_sender_id())
+        group_id = str(event.get_group_id() or event.get_sender_id())
+        
+        sender_id = str(event.get_sender_id())
+        match = await self.match_repo.get_active_match(group_id)
+        if match and self.admin_ids and sender_id not in [str(x) for x in self.admin_ids]:
+            yield event.plain_result("❌ 比赛期间只有管理员可以强制结束")
+            return
+        
         if not self.has_active_game(user_id):
             yield event.plain_result("没有初始化房间,请使用/fc")
             return
@@ -176,13 +299,35 @@ class Mrfzccl(Star):
     async def fct(self, event: AstrMessageEvent):
         """获取提示 /fct"""
         user_id = str(event.get_group_id() or event.get_sender_id())
+        group_id = str(event.get_group_id() or event.get_sender_id())
+        
+        sender_id = str(event.get_sender_id())
+        match = await self.match_repo.get_active_match(group_id)
+        if match and self.admin_ids and sender_id not in [str(x) for x in self.admin_ids]:
+            yield event.plain_result("❌ 比赛期间只有管理员可以使用提示")
+            return
+        
         if not self.has_active_game(user_id):
             yield event.plain_result("没有初始化房间,请使用/fc")
             return
-        if self.player[user_id]["fctn"] <= 2:
-            yield event.plain_result(
-                f"这个干员的{self.fct_key[self.player[user_id]['fctn']]}为:{self.data.get(self.player[user_id]['name'],{}).get(self.fct_key[self.player[user_id]['fctn']],'该干员没有该属性')}"
-            )
+        if self.player[user_id]["fctn"] <= 3:
+            key = self.fct_key[self.player[user_id]['fctn']]
+            char_data = self.data.get(self.player[user_id]['name'], {})
+            
+            # 特殊处理职业分支信息
+            if key == "职业及分支":
+                value = char_data.get("职业及分支", char_data.get("职业分支", "该干员没有该属性"))
+            # 星级转换为中文
+            elif self.player[user_id]['fctn'] == 1:
+                star_map = {"1": "一星", "2": "二星", "3": "三星", "4": "四星", "5": "五星", "6": "六星"}
+                value = star_map.get(str(char_data.get("星级", "")), char_data.get("星级", ""))
+            # 特殊处理阵营信息
+            elif key == "阵营":
+                value = char_data.get("阵营", char_data.get("所属阵营", "该干员没有该属性"))
+            else:
+                value = char_data.get(key, "该干员没有该属性")
+            
+            yield event.plain_result(f"这个干员的{key}为:{value}")
         else:
             name_len = self.player[user_id]["fctn"] - 2
             yield event.plain_result(f"这个干员的前{name_len}个字为:{self.player[user_id]['name'][:name_len]}")
@@ -192,14 +337,385 @@ class Mrfzccl(Star):
             user_name=event.get_sender_name()
         )
 
+    # 一次性获取三条提示
+    @filter.command("fcw")
+    async def fcw(self, event: AstrMessageEvent):
+        """一次性获取三条提示 /fcw"""
+        user_id = str(event.get_group_id() or event.get_sender_id())
+        group_id = str(event.get_group_id() or event.get_sender_id())
+        
+        sender_id = str(event.get_sender_id())
+        match = await self.match_repo.get_active_match(group_id)
+        if match and self.admin_ids and sender_id not in [str(x) for x in self.admin_ids]:
+            yield event.plain_result("❌ 比赛期间只有管理员可以使用提示")
+            return
+        
+        if not self.has_active_game(user_id):
+            yield event.plain_result("没有初始化房间,请使用/fc")
+            return
+        
+        char_data = self.data.get(self.player[user_id]['name'], {})
+        
+        logger.info(f"[fcw] player={self.player[user_id]}, char_data keys={list(char_data.keys()) if char_data else 'None'}")
+        
+        # 职业及分支
+        profession = char_data.get("职业及分支", char_data.get("职业分支", "该干员没有该属性"))
+        # 星级转换为中文
+        star = char_data.get("星级", "")
+        star_map = {"1": "一星", "2": "二星", "3": "三星", "4": "四星", "5": "五星", "6": "六星"}
+        star_cn = star_map.get(str(star), star)
+        # 阵营
+        camp = char_data.get("阵营", char_data.get("所属阵营", "该干员没有该属性"))
+        
+        msg = f"💡 一次性提示:\n"
+        msg += f"职业: {profession}\n"
+        msg += f"星级: {star_cn}\n"
+        msg += f"阵营: {camp}"
+        
+        yield event.plain_result(msg)
+        
+        self.player[user_id]["fctn"] = 4
+        await self.user_qna_repo.increment_tip_count(
+            user_id=event.get_sender_id(),
+            user_name=event.get_sender_name()
+        )
+
     @filter.command_group("ccl")
     def ccl(self):
         pass
+
+    # @filter.command_group("比赛")
+    # def match(self):
+    #     pass
+
+    # # 比赛帮助
+    # @match.command("帮助")
+    # async def match_help(self, event: AstrMessageEvent):
+    #     """比赛模式帮助"""
+    #     yield event.plain_result("""📋 比赛模式指令帮助
+    # ━━━━━━━━━━━━━━
+    # /比赛 创建 [名称] - 创建比赛
+    # /比赛 加入 - 加入比赛
+    # /比赛 开始 - 开始比赛(仅管理员)
+    # /比赛 结束 - 结束比赛(仅管理员)
+    # /比赛 排行榜 - 查看排行榜
+    # /比赛 我的荣誉 - 查看个人荣誉
+    # ━━━━━━━━━━━━━━""")
+
+    # # 创建比赛
+    # @match.command("创建")
+    # async def match_create(self, event: AstrMessageEvent, name: str = ""):
+    #     """创建比赛"""
+    #     user_id = str(event.get_sender_id())
+    #     group_id = str(event.get_group_id() or event.get_sender_id())
+    #     
+    #     existing = await self.match_repo.get_active_match(group_id)
+    #     if existing:
+    #         yield event.plain_result("❌ 当前群已有进行中的比赛")
+    #         return
+    #     
+    #     match_name = name if name else f"比赛_{int(time.time())}"
+    #     await self.match_repo.create_match(group_id, match_name)
+    #     yield event.plain_result(f"✅ 比赛「{match_name}」已创建！\n请参赛者发送 /比赛加入 参与")
+
+    # # 加入比赛
+    # @match.command("加入")
+    # async def match_join(self, event: AstrMessageEvent):
+    #     """加入比赛"""
+    #     user_id = str(event.get_sender_id())
+    #     user_name = event.get_sender_name()
+    #     group_id = str(event.get_group_id() or event.get_sender_id())
+    #     
+    #     match = await self.match_repo.get_active_match(group_id)
+    #     if not match:
+    #         yield event.plain_result("❌ 当前没有进行中的比赛")
+    #         return
+    #     
+    #     await self.match_repo.add_participant(match.match_id, user_id, user_name)
+    #     yield event.plain_result(f"✅ {user_name} 已加入比赛！")
+
+    # # 开始比赛
+    # @match.command("开始")
+    # async def match_start(self, event: AstrMessageEvent):
+    #     """开始比赛"""
+    #     user_id = str(event.get_sender_id())
+    #     group_id = str(event.get_group_id() or event.get_sender_id())
+    #     
+    #     if self.admin_ids and user_id not in [str(x) for x in self.admin_ids]:
+    #         yield event.plain_result("❌ 只有管理员可以开始比赛")
+    #         return
+    #     
+    #     match = await self.match_repo.get_active_match(group_id)
+    #     if not match:
+    #         yield event.plain_result("❌ 当前没有进行中的比赛")
+    #         return
+    #     
+    #     await self.match_repo.start_match(match.match_id)
+    #     yield event.plain_result("🏁 比赛已开始！第一题请使用 /fc 开始")
+    #     
+    #     # 启动比赛答题循环
+    #     asyncio.create_task(self._match_game_loop(group_id))
+
+    # # 比赛游戏循环
+    # async def _match_game_loop(self, group_id: str):
+    #     await asyncio.sleep(3)
+    #     for _ in range(10):  # 比赛10题
+    #         match = await self.match_repo.get_active_match(group_id)
+    #         if not match or not match.is_active:
+    #             break
+    #         
+    #         result = await self.fc_init(group_id)
+    #         if result and result != "already_exists":
+    #             # 发送题目图片
+    #             pass
+    #         
+    #         await asyncio.sleep(self.match_answer_delay)
+
+    # # 结束比赛
+    # @match.command("结束")
+    # async def match_end(self, event: AstrMessageEvent):
+    #     """结束比赛"""
+    #     user_id = str(event.get_sender_id())
+    #     group_id = str(event.get_group_id() or event.get_sender_id())
+    #     
+    #     if self.admin_ids and user_id not in [str(x) for x in self.admin_ids]:
+    #         yield event.plain_result("❌ 只有管理员可以结束比赛")
+    #         return
+    #     
+    #     match = await self.match_repo.get_active_match(group_id)
+    #     if not match:
+    #         yield event.plain_result("❌ 当前没有进行中的比赛")
+    #         return
+    #     
+    #     await self.match_repo.end_match(match.match_id)
+    #     yield event.plain_result("🏁 比赛已结束！")
+    #     
+    #     # 显示排行榜
+    #     participants = await self.match_repo.get_participants(match.match_id)
+    #     participants.sort(key=lambda p: p.correct_count, reverse=True)
+    #     
+    #     msg = "🏆 比赛排行榜\n━━━━━━━━━━━━━━\n"
+    #     for i, p in enumerate(participants[:10], 1):
+    #         msg += f"{i}. {p.user_name}: {p.correct_count}题\n"
+    #     
+    #     yield event.plain_result(msg)
+
+    # # 比赛排行榜
+    # @match.command("排行榜")
+    # async def match_leaderboard(self, event: AstrMessageEvent):
+    #     """比赛排行榜"""
+    #     group_id = str(event.get_group_id() or event.get_sender_id())
+    #     match = await self.match_repo.get_active_match(group_id)
+    #     if not match:
+    #         yield event.plain_result("❌ 无进行中比赛")
+    #         return
+    #     
+    #     participants = await self.match_repo.get_participants(match.match_id)
+    #     participants.sort(key=lambda p: p.correct_count, reverse=True)
+    #     
+    #     msg = "🏆 比赛排行榜\n━━━━━━━━━━━━━━\n"
+    #     for i, p in enumerate(participants[:10], 1):
+    #         msg += f"{i}. {p.user_name}: {p.correct_count}题\n"
+    #     yield event.plain_result(msg)
+
+    # # 我的荣誉
+    # @match.command("我的荣誉")
+    # async def match_honors(self, event: AstrMessageEvent):
+    #     """查看个人荣誉"""
+    #     user_id = str(event.get_sender_id())
+    #     honors = await self.match_repo.get_user_honors(user_id)
+    #     
+    #     if not honors:
+    #         yield event.plain_result("暂无荣誉记录")
+    #         return
+    #     
+    #     msg = "🏅 个人荣誉\n━━━━━━━━━━━━━━\n"
+    #     for h in honors[:10]:
+    #         msg += f"{h.medal} {h.match_name}: 第{h.rank}名 ({h.correct_count}题)\n"
+    #     yield event.plain_result(msg)
+
+    # 比赛帮助
+    @ccl.command("比赛帮助")
+    async def match_help(self, event: AstrMessageEvent):
+        """比赛模式帮助"""
+        yield event.plain_result("""📋 比赛模式指令帮助
+━━━━━━━━━━━━━━
+/ccl 比赛创建 [名称] - 创建比赛(仅管理员)
+/ccl 比赛开始        - 开始比赛(仅管理员)
+/ccl 比赛结束/结束比赛 - 结束比赛(仅管理员)
+/ccl 比赛排行/排行   - 查看比赛排行榜
+━━━━━━━━━━━━━━""")
+
+    # 创建比赛
+    @ccl.command("比赛创建")
+    async def match_create(self, event: AstrMessageEvent, name: str = "", question_limit: int = 0, time_limit: int = 0):
+        """创建比赛（仅管理员）用法: /ccl比赛创建 [名称] [题目限制] [时间限制(分钟)]
+        例如: /ccl春节赛 20 30 表示创建名称为"春节赛"、答完20题自动结束、最多30分钟的比赛
+        题目限制填0表示不限制，时间限制填0表示不限制。比赛开始后，参与答题的用户自动成为参赛者"""
+        user_id = str(event.get_sender_id())
+        group_id = str(event.get_group_id() or event.get_sender_id())
+        
+        if self.admin_ids and user_id not in [str(x) for x in self.admin_ids]:
+            yield event.plain_result("❌ 只有管理员可以创建比赛")
+            return
+        
+        existing = await self.match_repo.get_active_match(group_id)
+        if existing:
+            yield event.plain_result("❌ 当前群已有进行中的比赛")
+            return
+        
+        q_limit = question_limit if question_limit > 0 else self.match_question_limit
+        t_limit = time_limit if time_limit > 0 else self.match_time_limit
+        
+        match_name = name if name else f"比赛_{int(time.time())}"
+        await self.match_repo.create_match(group_id, match_name, q_limit, t_limit)
+        
+        info = f"✅ 比赛「{match_name}」已创建！"
+        if q_limit > 0:
+            info += f"\n📝 题目限制: {q_limit}题"
+        if t_limit > 0:
+            info += f"\n⏱️ 时间限制: {t_limit}分钟"
+        info += "\n使用 /fcc 进行答题即可参与比赛"
+        yield event.plain_result(info)
+
+    # 比赛游戏循环
+    @ccl.command("比赛开始")
+    async def match_start(self, event: AstrMessageEvent):
+        """开始比赛（仅管理员）"""
+        user_id = str(event.get_sender_id())
+        group_id = str(event.get_group_id() or event.get_sender_id())
+        
+        if self.admin_ids and user_id not in [str(x) for x in self.admin_ids]:
+            yield event.plain_result("❌ 只有管理员可以开始比赛")
+            return
+        
+        match = await self.match_repo.get_active_match(group_id)
+        if not match:
+            yield event.plain_result("❌ 当前没有进行中的比赛")
+            return
+        
+        await self.match_repo.start_match(match.match_id)
+        
+        result = await self.fc_init(group_id)
+        if result and result != "already_exists":
+            yield event.chain_result([
+                Comp.Plain("🏁 比赛已开始！答题即为参与比赛\n干员立绘,请使用/fcc [干员名称] 进行猜测"),
+                Comp.Image.fromBytes(result)
+            ])
+        else:
+            yield event.plain_result("🏁 比赛已开始！第一题获取失败，请重试")
+        
+        asyncio.create_task(self._match_game_loop(group_id, event))
+
+    # 比赛游戏循环 - 用于检查结束条件
+    async def _match_game_loop(self, group_id: str, event: AstrMessageEvent):
+        await asyncio.sleep(2)
+        
+        start_time = time.time()
+        last_check = start_time
+        max_questions = self.match_question_limit if self.match_question_limit > 0 else 999999
+        time_limit_seconds = self.match_time_limit * 60 if self.match_time_limit > 0 else 999999999
+        
+        while True:
+            await asyncio.sleep(5)
+            
+            match = await self.match_repo.get_active_match(group_id)
+            if not match or not match.is_active:
+                break
+            
+            if time.time() - start_time > time_limit_seconds:
+                await self.match_repo.end_match(match.match_id)
+                break
+            
+            if match.question_limit > 0:
+                participants = await self.match_repo.get_participants(match.match_id)
+                total_answers = sum(p.correct_count + p.wrong_count for p in participants)
+                if total_answers >= match.question_limit:
+                    await self.match_repo.end_match(match.match_id)
+                    break
+            
+            await asyncio.sleep(1)
+
+    # 结束比赛
+    @ccl.command("比赛结束")
+    async def match_end(self, event: AstrMessageEvent):
+        """结束比赛"""
+        user_id = str(event.get_sender_id())
+        group_id = str(event.get_group_id() or event.get_sender_id())
+        
+        if self.admin_ids and user_id not in [str(x) for x in self.admin_ids]:
+            yield event.plain_result("❌ 只有管理员可以结束比赛")
+            return
+        
+        match = await self.match_repo.get_active_match(group_id)
+        if not match:
+            yield event.plain_result("❌ 当前没有进行中的比赛")
+            return
+        
+        match_name = match.match_name
+        match_id = match.match_id
+        
+        await self.match_repo.end_match(match_id)
+        
+        if group_id in self.match_question_state:
+            del self.match_question_state[group_id]
+        if group_id in self.match_next_task:
+            if self.match_next_task[group_id]:
+                try:
+                    self.match_next_task[group_id].cancel()
+                except:
+                    pass
+            del self.match_next_task[group_id]
+        
+        players_to_remove = [uid for uid, p in self.player.items() if str(p.get("group_id", "")) == group_id]
+        for uid in players_to_remove:
+            del self.player[uid]
+        
+        participants = await self.match_repo.get_participants(match_id)
+        participants.sort(key=lambda p: p.score, reverse=True)
+        
+        msg = f"🏆 比赛「{match_name}」已结束！\n━━━━━━━━━━━━━━\n"
+        msg += "🏆 排行榜\n"
+        for i, p in enumerate(participants[:10], 1):
+            msg += f"{i}. {p.user_name}: {p.correct_count}对/{p.wrong_count}错={p.score:.2f}分\n"
+        
+        yield event.plain_result(msg)
+        
+        for i, p in enumerate(participants[:10], 1):
+            await self.match_repo.save_honor(
+                p.user_id, match.match_id, match_name, i,
+                p.correct_count, p.wrong_count, p.score
+            )
+
+    # 比赛排行榜
+    @ccl.command("比赛排行")
+    async def match_leaderboard(self, event: AstrMessageEvent):
+        """比赛排行榜"""
+        group_id = str(event.get_group_id() or event.get_sender_id())
+        match = await self.match_repo.get_active_match(group_id)
+        if not match:
+            yield event.plain_result("❌ 无进行中比赛")
+            return
+        
+        participants = await self.match_repo.get_participants(match.match_id)
+        participants.sort(key=lambda p: p.score, reverse=True)
+        
+        msg = f"🏆 比赛「{match.match_name}」排行榜\n━━━━━━━━━━━━━━\n"
+        for i, p in enumerate(participants[:10], 1):
+            msg += f"{i}. {p.user_name}: {p.correct_count}对/{p.wrong_count}错={p.score:.2f}分\n"
+        yield event.plain_result(msg)
+    
+    # 获取荣誉
 
     # 获取正确个数的排行榜
     @ccl.command("排行榜")
     async def correct_answers_leaderboard(self, event: AstrMessageEvent):
         """获取正确个数的排行榜 /ccl 排行榜"""
+        user_id = str(event.get_sender_id())
+        if self.admin_ids and user_id not in [str(x) for x in self.admin_ids]:
+            yield event.plain_result("❌ 只有管理员可以查看排行榜")
+            return
+        
         try:
             # 获取排行榜数据（前10名）
             users = await self.user_qna_repo.get_correct_answers_leaderboard(limit=10)
@@ -226,6 +742,11 @@ class Mrfzccl(Star):
     @ccl.command("错误排行榜")
     async def wrong_answers_leaderboard(self, event: AstrMessageEvent):
         """获取错误个数的排行榜 /ccl 错误排行榜"""
+        user_id = str(event.get_sender_id())
+        if self.admin_ids and user_id not in [str(x) for x in self.admin_ids]:
+            yield event.plain_result("❌ 只有管理员可以查看排行榜")
+            return
+        
         try:
             # 获取排行榜数据（前10名）
             users = await self.user_qna_repo.get_wrong_answers_leaderboard(limit=10)
@@ -249,6 +770,11 @@ class Mrfzccl(Star):
     @ccl.command("提示排行榜")
     async def hints_usage_leaderboard(self, event: AstrMessageEvent):
         """获取使用提示次数的排行榜 /ccl 提示排行榜"""
+        user_id = str(event.get_sender_id())
+        if self.admin_ids and user_id not in [str(x) for x in self.admin_ids]:
+            yield event.plain_result("❌ 只有管理员可以查看排行榜")
+            return
+        
         try:
             # 获取排行榜数据（前10名）
             users = await self.user_qna_repo.get_hints_usage_leaderboard(limit=10)
@@ -273,26 +799,134 @@ class Mrfzccl(Star):
     async def user_profile_retrieval(self, event: AstrMessageEvent, user_id: str | None = None):
         """获取个人信息获取 /ccl 名片 [user_id] (如果user_id为空默认为发送人)"""
         try:
-            # 确定用户ID
             target_user_id = user_id or event.get_sender_id()
 
-            # 获取用户信息及排名
             user_stats, rank_info = await self.user_qna_repo.get_user_profile_with_rank(target_user_id)
 
-            if not user_stats:
+            if not user_stats and user_id:
                 yield event.plain_result("❌ 未找到该用户的答题记录")
                 return
 
-            # 使用统一的图片/文本生成函数
-            async for result in self._generate_image_or_fallback(
-                    event=event,
-                    generate_image_func=lambda: self.renderer.generate_user_profile_image(user_stats, rank_info),
-                    generate_text_func=lambda: self._generate_user_profile_text(user_stats, rank_info),
-            ):
-                yield result
+            honors = await self.match_repo.get_user_honors(str(target_user_id))
+            
+            msg = f"👤 用户 {target_user_id}\n━━━━━━━━━━━━━━\n"
+            if user_stats:
+                total_attempts = user_stats.correct_count + user_stats.wrong_count
+                msg += f"✅ 答对: {user_stats.correct_count}题\n"
+                msg += f"📝 总答题: {total_attempts}题\n"
+                msg += f"🎯 正确率: {user_stats.correct_count*100//max(total_attempts,1)}%\n"
+                if rank_info:
+                    msg += f"🏆 排名: 第{rank_info.get('rank', '?')}名\n"
+            else:
+                msg += "暂无答题记录\n"
+            
+            if honors:
+                msg += "\n🏅 荣誉记录\n"
+                for h in honors[:5]:
+                    msg += f"  {h.medal} {h.match_name}: 第{h.rank}名\n"
+            else:
+                msg += "\n暂无荣誉记录\n"
+            
+            yield event.plain_result(msg)
 
         except Exception as e:
             yield event.plain_result(f"获取用户信息时出现错误: {str(e)}")
+
+    @ccl.command("清除数据")
+    async def reset_user_data(self, event: AstrMessageEvent, target_user_id: str = ""):
+        """清除用户答题数据（仅管理员）/ccl 清除数据 [user_id]"""
+        user_id = str(event.get_sender_id())
+        
+        if self.admin_ids and user_id not in [str(x) for x in self.admin_ids]:
+            yield event.plain_result("❌ 只有管理员可以清除数据")
+            return
+        
+        if target_user_id:
+            await self.user_qna_repo.reset_user_stats(target_user_id)
+            yield event.plain_result(f"✅ 用户 {target_user_id} 的答题数据已清除")
+        else:
+            await self.user_qna_repo.reset_user_stats(user_id)
+            yield event.plain_result("✅ 您的答题数据已清除")
+
+    @ccl.command("清除荣誉")
+    async def reset_user_honors_cmd(self, event: AstrMessageEvent, target_user_id: str = ""):
+        """清除用户荣誉数据（仅管理员）/ccl 清除荣誉 [user_id]"""
+        user_id = str(event.get_sender_id())
+        
+        if self.admin_ids and user_id not in [str(x) for x in self.admin_ids]:
+            yield event.plain_result("❌ 只有管理员可以清除荣誉")
+            return
+        
+        if target_user_id:
+            await self.match_repo.reset_user_honors(target_user_id)
+            yield event.plain_result(f"✅ 用户 {target_user_id} 的荣誉数据已清除")
+        else:
+            await self.match_repo.reset_user_honors(user_id)
+            yield event.plain_result("✅ 您的荣誉数据已清除")
+
+    @ccl.command("清除所有数据")
+    async def reset_all_data_cmd(self, event: AstrMessageEvent):
+        """清除所有用户的答题数据（仅管理员）/ccl 清除所有数据"""
+        user_id = str(event.get_sender_id())
+        
+        if self.admin_ids and user_id not in [str(x) for x in self.admin_ids]:
+            yield event.plain_result("❌ 只有管理员可以清除所有数据")
+            return
+        
+        await self.user_qna_repo.reset_all_stats()
+        yield event.plain_result("✅ 所有用户的答题数据已清除")
+
+    @ccl.command("清除所有荣誉")
+    async def reset_all_honors_cmd(self, event: AstrMessageEvent):
+        """清除所有用户的荣誉数据（仅管理员）/ccl 清除所有荣誉"""
+        user_id = str(event.get_sender_id())
+        
+        if self.admin_ids and user_id not in [str(x) for x in self.admin_ids]:
+            yield event.plain_result("❌ 只有管理员可以清除所有荣誉")
+            return
+        
+        await self.match_repo.reset_all_honors()
+        yield event.plain_result("✅ 所有用户的荣誉数据已清除")
+
+    @ccl.command("授予荣誉")
+    async def grant_honor_cmd(self, event: AstrMessageEvent, target_user_id: str = "", rank: int = 1, match_name: str = "", correct_count: int = 0):
+        """授予用户特定荣誉（仅管理员）/ccl 授予荣誉 [user_id] [名次] [比赛名称] [答对数量]
+        例如: /ccl 授予荣誉 123456 1 测试赛 10"""
+        user_id = str(event.get_sender_id())
+        
+        if self.admin_ids and user_id not in [str(x) for x in self.admin_ids]:
+            yield event.plain_result("❌ 只有管理员可以授予荣誉")
+            return
+        
+        if not target_user_id or not match_name:
+            yield event.plain_result("❌ 请提供完整参数: /ccl 授予荣誉 [user_id] [名次] [比赛名称] [答对数量]")
+            return
+        
+        # 生成奖牌
+        if rank == 1:
+            medal = "🥇"
+        elif rank == 2:
+            medal = "🥈"
+        elif rank == 3:
+            medal = "🥉"
+        else:
+            medal = f"{rank}"
+        
+        # 计算得分
+        score = correct_count - 0  # 错误数默认为0
+        
+        # 保存荣誉
+        await self.match_repo.save_honor(
+            user_id=target_user_id,
+            match_id=0,  # 虚拟比赛ID
+            match_name=match_name,
+            rank=rank,
+            correct_count=correct_count,
+            wrong_count=0,
+            score=score
+        )
+        
+        yield event.plain_result(f"✅ 已授予用户 {target_user_id} 荣誉: {medal} {match_name} 第{rank}名, 答对{correct_count}题")
 
     # ========== 排行榜相关函数 ==========
     # 生成正确量排行榜文本
@@ -480,6 +1114,41 @@ class Mrfzccl(Star):
         data = self.player.get(user_id)
         return bool(data and data.get("status") == "active")
 
+    # 加载别名映射
+    def _load_aliases(self):
+        alias_str = self.Config.get("character_aliases", "钛铱:白金,宫羽:澄闪,小刻:刻俄柏,小羊:艾雅法拉")
+        for pair in alias_str.split(","):
+            if ":" in pair:
+                alias, name = pair.split(":", 1)
+                self.alias_map[alias.strip()] = name.strip()
+
+    # 解析别名
+    def resolve_alias(self, name: str) -> str:
+        return self.alias_map.get(name, name)
+
+    # 获取汉字的拼音（不带声调）
+    def get_pinyin(self, text: str) -> str:
+        return ''.join(lazy_pinyin(text, style=Style.NORMAL))
+
+    # 检查两个字符串是否同音（基于拼音）
+    def check_homophone(self, correct: str, guess: str) -> bool:
+        if not self.enable_homophone:
+            return False
+        correct_pinyin = self.get_pinyin(correct)
+        guess_pinyin = self.get_pinyin(guess)
+        return correct_pinyin == guess_pinyin
+
+    # 检查每日限制
+    def check_daily_limit(self, user_id: str) -> bool:
+        from datetime import datetime
+        today = datetime.now().date()
+        key = f"{user_id}_{today}"
+        count = self.daily_counter.get(key, 0)
+        if count >= self.daily_limit:
+            return False
+        self.daily_counter[key] = count + 1
+        return True
+
     # 初始化游戏，返回临时文件路径
     async def fc_init(self, user_id: str) -> bytes | str | None:
         if self.has_active_game(user_id):
@@ -506,11 +1175,20 @@ class Mrfzccl(Star):
             question["status"] = "active"
             self.player[user_id] = question
             loop = asyncio.get_running_loop()
+            r = random.random()
+            cumulative = self.easy_probability
+            if r < cumulative:
+                block_count = 5
+            elif r < cumulative + self.medium_probability:
+                block_count = 3
+            else:
+                block_count = 1
+            
             result, _ = await loop.run_in_executor(
                 None,
                 self.mask_image_with_random_blocks,
                 image,
-                5
+                block_count
             )
             resized = await loop.run_in_executor(
                 None,
@@ -537,7 +1215,28 @@ class Mrfzccl(Star):
             if not names:
                 logger.error("[extract_questions] 数据为空")
                 return None
-            random_name = random.choice(names)
+            
+            # 过滤最近出现过的干员
+            available_names = [n for n in names if n not in self.recent_characters]
+            if not available_names:
+                available_names = names
+                self.recent_characters = []
+            
+            # 低权重干员筛选
+            low_weight_names = [n for n in available_names if any(kw in n for kw in self.low_weight_keywords)]
+            normal_names = [n for n in available_names if n not in low_weight_names]
+            
+            # 权重: 普通干员 vs 低权重干员
+            if low_weight_names and normal_names and random.random() < self.low_weight_ratio:
+                random_name = random.choice(low_weight_names)
+            else:
+                random_name = random.choice(normal_names) if normal_names else random.choice(available_names)
+            
+            # 更新最近干员列表
+            self.recent_characters.append(random_name)
+            if len(self.recent_characters) > self.max_recent_count:
+                self.recent_characters.pop(0)
+            
             character_data = self.data[random_name]
             if not isinstance(character_data, dict):
                 logger.error(f"[extract_questions] 角色数据格式错误: {random_name}")
@@ -567,6 +1266,10 @@ class Mrfzccl(Star):
     def _get_absolute_path(self, path: str) -> str:
         if not path:
             raise ValueError("路径不能为空")
+        # 如果是相对路径，相对于插件目录解析
+        if not os.path.isabs(path):
+            plugin_dir = os.path.dirname(os.path.abspath(__file__))
+            path = os.path.join(plugin_dir, path)
         return os.path.abspath(path)
 
     # 从URL异步获取图片
