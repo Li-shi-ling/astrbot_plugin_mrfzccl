@@ -3,11 +3,12 @@ from astrbot.api.star import Context, Star, register
 from typing import Optional, Dict, Any, Tuple, List
 from .src.QnAStatsRenderer import QnAStatsRenderer
 from .src.tool import calculate_char_coverage_set
+from .src.db.repo import UserQnARepo, MatchRepo
 import astrbot.api.message_components as Comp
 from astrbot.api import AstrBotConfig, logger
+from pypinyin import lazy_pinyin, Style
 from astrbot.api.star import StarTools
 from .src.db.database import DBManager
-from .src.db.repo import UserQnARepo, MatchRepo
 from difflib import SequenceMatcher
 from urllib.parse import urlparse
 from io import BytesIO
@@ -21,7 +22,6 @@ import json
 import time
 import os
 import re
-from pypinyin import lazy_pinyin, Style
 
 @register("mrfzccl", "Lishining", "你知道的,我一直是明日方舟高手", "1.0.0")
 class Mrfzccl(Star):
@@ -198,8 +198,12 @@ class Mrfzccl(Star):
     @filter.command("fcc")
     async def fcc(self, event: AstrMessageEvent):
         """进行猜题 /fcc [干员名称]"""
-        user_id = str(event.get_group_id() or event.get_sender_id())
-        group_id = str(event.get_group_id() or event.get_sender_id())
+        group_id = event.get_group_id()
+        is_group = not group_id is None
+        if is_group:
+            user_id = event.get_sender_id()
+        else:
+            user_id = group_id
         
         logger.info(f"[fcc] user_id={user_id}, player_keys={list(self.player.keys())}, has_active={self.has_active_game(user_id)}")
         

@@ -33,10 +33,11 @@ class DBManager:
             class_=AsyncSession,
             expire_on_commit=False,
         )
+        self.async_session_factory = self.async_session
 
     async def init_db(self):
         """初始化数据库，创建所有定义的表"""
-        from .tables import UserQnAStats
+        from .tables import UserQnAStats, Match, MatchParticipant, MatchHonor
 
         async with self.engine.begin() as conn:
             try:
@@ -44,6 +45,50 @@ class DBManager:
             except OperationalError as e:
                 if not "already exists" in str(e):
                     raise
+
+        async with self.engine.begin() as conn:
+            try:
+                await conn.execute(text(
+                    "ALTER TABLE match ADD COLUMN question_limit INTEGER DEFAULT 0"
+                ))
+            except OperationalError:
+                pass
+            try:
+                await conn.execute(text(
+                    "ALTER TABLE match ADD COLUMN time_limit INTEGER DEFAULT 0"
+                ))
+            except OperationalError:
+                pass
+            try:
+                await conn.execute(text(
+                    "ALTER TABLE match ADD COLUMN started_at TIMESTAMP"
+                ))
+            except OperationalError:
+                pass
+            try:
+                await conn.execute(text(
+                    "ALTER TABLE match_participant ADD COLUMN wrong_count INTEGER DEFAULT 0"
+                ))
+            except OperationalError:
+                pass
+            try:
+                await conn.execute(text(
+                    "ALTER TABLE match_participant ADD COLUMN score REAL DEFAULT 0.0"
+                ))
+            except OperationalError:
+                pass
+            try:
+                await conn.execute(text(
+                    "ALTER TABLE match_honor ADD COLUMN wrong_count INTEGER DEFAULT 0"
+                ))
+            except OperationalError:
+                pass
+            try:
+                await conn.execute(text(
+                    "ALTER TABLE match_honor ADD COLUMN score REAL DEFAULT 0.0"
+                ))
+            except OperationalError:
+                pass
 
         # SQLite 优化 PRAGMA
         async with self.engine.connect() as conn:
@@ -58,6 +103,9 @@ class DBManager:
     @asynccontextmanager
     async def get_session(self) -> AsyncGenerator[AsyncSession, None]:
         """异步获取数据库会话的上下文管理器"""
-        async with self.async_session() as session:
+        session = self.async_session_factory()
+        try:
             async with session.begin():
                 yield session
+        finally:
+            await session.close()
