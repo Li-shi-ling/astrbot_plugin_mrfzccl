@@ -53,12 +53,7 @@
     "default": 10,
     "hint": "0表示无限制"
   },
-  "match_answer_delay": {
-    "description": "比赛每次答题正确后的等待时间(秒)",
-    "type": "int",
-    "default": 7,
-    "hint": "自定义秒数"
-  },
+
   "match_question_limit": {
     "description": "比赛答题数量限制(0表示不限制)",
     "type": "int",
@@ -92,7 +87,13 @@
   "character_aliases": {
     "description": "干员别名映射(别名:正名,多组用逗号分隔)",
     "type": "string",
-    "default": "钛铱:白金,宫羽:澄闪,小刻:刻俄柏,小羊:艾雅法拉,42:史尔特尔",
+    "default": "小刻:刻俄柏,小羊:艾雅法拉,42:史尔特尔,42姐:史尔特尔,玫剑圣:玫兰莎,克天使:克洛丝,kokodayo:克洛丝,猛男:安塞尔,医疗小车:Lancet-2,近卫小车:Castle-3,太子爷:12F,桃:桃金娘,富婆:杰西卡,阿米驴:阿米娅,银老板:银灰,前夫哥:银灰,虎鲸:斯卡蒂,蒂蒂:斯卡蒂,大腿夹剑:斯卡蒂,老爷子:赫拉格,大公:赫拉格,肠粉龙:陈,煌猫:煌,寒哥:棘刺,傻狗:刻俄柏,忧郁蓝调:莫斯提马,企鹅:麦哲伦,瑕子姐:瑕光,闪剑圣:闪灵,喜羊羊:闪灵,塞爹:塞雷娅,塞妈:塞雷娅,莱茵拳皇:塞雷娅,鬼姐:星熊,星sir:星熊",
     "hint": "格式: 别名1:正名1,别名2:正名2"
+  },
+  "storage_dir": {
+    "description": "存储目录路径",
+    "type": "string",
+    "default": "./plugin_data",
+    "hint": "例如：./plugin_data 或 /path/to/storage"
   }
 }

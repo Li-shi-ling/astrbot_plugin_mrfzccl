@@ -69,7 +69,12 @@ class Mrfzccl(Star):
         self._executor = None  # 线程池执行器
 
         # 获取存储目录配置
-        self.storage_dir = self.Config.get("storage_dir", "E:\\astrbot\\plugin_data")
+        self.storage_dir = self.Config.get("storage_dir", "./plugin_data")
+        # 如果是相对路径，将其转换为绝对路径
+        if not os.path.isabs(self.storage_dir):
+            # 获取插件所在目录
+            plugin_dir = os.path.dirname(os.path.abspath(__file__))
+            self.storage_dir = os.path.join(plugin_dir, self.storage_dir)
         logger.info(f"[Mrfzccl] 存储目录: {self.storage_dir}")
         
         # 确保存储目录存在
@@ -87,7 +92,6 @@ class Mrfzccl(Star):
 
         # 比赛配置（需在db初始化后）
         self.match_repo = MatchRepo(self.db)
-        self.match_answer_delay = self.Config.get("match_answer_delay", 7)
         self.match_question_limit = self.Config.get("match_question_limit", 0)
         self.match_time_limit = self.Config.get("match_time_limit", 0)
         self.admin_ids = self.Config.get("admin_ids", [])
@@ -544,10 +548,10 @@ class Mrfzccl(Star):
 
     # 创建比赛
     @ccl.command("比赛创建")
-    async def match_create(self, event: AstrMessageEvent, name: str = "", question_limit: int = 0, time_limit: int = 0, delay: int = 0):
-        """创建比赛（仅管理员）用法: /ccl比赛创建 [名称] [题目限制] [时间限制(分钟)] [等待时间(秒)]
-        例如: /ccl春节赛 20 30 5 表示创建名称为"春节赛"、答完20题自动结束、最多30分钟的比赛，每次答题正确后等待5秒
-        题目限制填0表示不限制，时间限制填0表示不限制，等待时间填0表示使用默认值。比赛开始后，参与答题的用户自动成为参赛者"""
+    async def match_create(self, event: AstrMessageEvent, name: str = "", question_limit: int = 0, time_limit: int = 0):
+        """创建比赛（仅管理员）用法: /ccl比赛创建 [名称] [题目限制] [时间限制(分钟)]
+        例如: /ccl春节赛 20 30 表示创建名称为"春节赛"、答完20题自动结束、最多30分钟的比赛
+        题目限制填0表示不限制，时间限制填0表示不限制。比赛开始后，参与答题的用户自动成为参赛者"""
         user_id = str(event.get_sender_id())
         group_id = str(event.get_group_id() or event.get_sender_id())
         
@@ -563,10 +567,6 @@ class Mrfzccl(Star):
         q_limit = question_limit if question_limit > 0 else self.match_question_limit
         t_limit = time_limit if time_limit > 0 else self.match_time_limit
         
-        # 保存自定义等待时间（如果提供）
-        if delay > 0:
-            self.match_answer_delay = delay
-        
         match_name = name if name else f"比赛_{int(time.time())}"
         await self.match_repo.create_match(group_id, match_name, q_limit, t_limit)
         
@@ -575,10 +575,6 @@ class Mrfzccl(Star):
             info += f"\n📝 题目限制: {q_limit}题"
         if t_limit > 0:
             info += f"\n⏱️ 时间限制: {t_limit}分钟"
-        if delay > 0:
-            info += f"\n⏳ 等待时间: {delay}秒"
-        else:
-            info += f"\n⏳ 等待时间: {self.match_answer_delay}秒（默认）"
         info += "\n使用 /fcc 进行答题即可参与比赛"
         yield event.plain_result(info)
 
