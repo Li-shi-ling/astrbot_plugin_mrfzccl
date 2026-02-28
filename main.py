@@ -160,6 +160,7 @@ class Mrfzccl(Star):
         self.cleanup_task: asyncio.Task | None = None
         self.cleanup_running = True
 
+    # ========== 游戏相关指令 ==========
     # 初始化游戏命令
     @filter.command("fc")
     async def fc(self, event: AstrMessageEvent):
@@ -222,12 +223,11 @@ class Mrfzccl(Star):
         group_id = event.get_group_id()
         is_group = not group_id is None
         if is_group:
-            user_id = event.get_sender_id()  # 群聊中使用发送者ID
+            user_id = str(group_id)
         else:
-            user_id = group_id  # 私聊中使用群组ID
+            user_id = str(event.get_sender_id())
 
-        logger.debug(
-            f"[fcc] user_id={user_id}, player_keys={list(self.player.keys())}, has_active={self.has_active_game(user_id)}")
+        logger.debug(f"[fcc] user_id={user_id}, player_keys={list(self.player.keys())}, has_active={self.has_active_game(user_id)}")
 
         # 检查是否有活跃比赛
         match = await self.match_repo.get_active_match(group_id)
@@ -315,10 +315,13 @@ class Mrfzccl(Star):
     @filter.command("fce")
     async def fce(self, event: AstrMessageEvent):
         """强置结束游戏 /fce"""
-        user_id = str(event.get_group_id() or event.get_sender_id())
-        group_id = str(event.get_group_id() or event.get_sender_id())
-
+        group_id = event.get_group_id()
         sender_id = str(event.get_sender_id())
+        if not group_id is None:
+            user_id = str(group_id)
+        else:
+            user_id = sender_id
+
         # 检查比赛模式下是否有权限
         match = await self.match_repo.get_active_match(group_id)
         if match and self.admin_ids and sender_id not in [str(x) for x in self.admin_ids]:
@@ -438,208 +441,13 @@ class Mrfzccl(Star):
             user_name=event.get_sender_name()
         )
 
+    # ========== ccl 相关指令 ==========
     # 创建命令组ccl
     @filter.command_group("ccl")
     def ccl(self):
         pass
 
-    # 比赛帮助命令
-    @ccl.command("比赛帮助")
-    async def match_help(self, event: AstrMessageEvent):
-        """比赛模式帮助"""
-        yield event.plain_result("""📋 比赛模式指令帮助
-━━━━━━━━━━━━━━
-/ccl 比赛创建 [名称] - 创建比赛(仅管理员)
-/ccl 比赛开始        - 开始比赛(仅管理员)
-/ccl 比赛结束/结束比赛 - 结束比赛(仅管理员)
-/ccl 比赛排行/排行   - 查看比赛排行榜
-━━━━━━━━━━━━━━""")
-
-    # 创建比赛命令
-    @ccl.command("比赛创建")
-    async def match_create(self, event: AstrMessageEvent, name: str = "", question_limit: int = 0, time_limit: int = 0):
-        """创建比赛（仅管理员）用法: /ccl比赛创建 [名称] [题目限制] [时间限制(分钟)]
-        例如: /ccl春节赛 20 30 表示创建名称为"春节赛"、答完20题自动结束、最多30分钟的比赛
-        题目限制填0表示不限制，时间限制填0表示不限制。比赛开始后，参与答题的用户自动成为参赛者"""
-        user_id = str(event.get_sender_id())
-        group_id = str(event.get_group_id() or event.get_sender_id())
-
-        # 检查管理员权限
-        if self.admin_ids and user_id not in [str(x) for x in self.admin_ids]:
-            yield event.plain_result("❌ 只有管理员可以创建比赛")
-            return
-
-        # 检查是否已有进行中的比赛
-        existing = await self.match_repo.get_active_match(group_id)
-        if existing:
-            yield event.plain_result("❌ 当前群已有进行中的比赛")
-            return
-
-        # 设置题目限制和时间限制
-        q_limit = question_limit if question_limit > 0 else self.match_question_limit
-        t_limit = time_limit if time_limit > 0 else self.match_time_limit
-
-        # 创建比赛名称
-        match_name = name if name else f"比赛_{int(time.time())}"
-        # 创建比赛
-        await self.match_repo.create_match(group_id, match_name, q_limit, t_limit)
-
-        # 构建响应信息
-        info = f"✅ 比赛「{match_name}」已创建！"
-        if q_limit > 0:
-            info += f"\n📝 题目限制: {q_limit}题"
-        if t_limit > 0:
-            info += f"\n⏱️ 时间限制: {t_limit}分钟"
-        info += "\n使用 /fcc 进行答题即可参与比赛"
-        yield event.plain_result(info)
-
-    # 比赛游戏循环
-    @ccl.command("比赛开始")
-    async def match_start(self, event: AstrMessageEvent):
-        """开始比赛（仅管理员）"""
-        user_id = str(event.get_sender_id())
-        group_id = str(event.get_group_id() or event.get_sender_id())
-
-        # 检查管理员权限
-        if self.admin_ids and user_id not in [str(x) for x in self.admin_ids]:
-            yield event.plain_result("❌ 只有管理员可以开始比赛")
-            return
-
-        # 获取活跃比赛
-        match = await self.match_repo.get_active_match(group_id)
-        if not match:
-            yield event.plain_result("❌ 当前没有进行中的比赛")
-            return
-
-        # 开始比赛
-        await self.match_repo.start_match(match.match_id)
-
-        # 初始化第一题
-        result = await self.fc_init(group_id)
-        if result and result != "already_exists":
-            yield event.chain_result([
-                Comp.Plain("🏁 比赛已开始！答题即为参与比赛\n干员立绘,请使用/fcc [干员名称] 进行猜测"),
-                Comp.Image.fromBytes(result)
-            ])
-        else:
-            yield event.plain_result("🏁 比赛已开始！第一题获取失败，请重试")
-
-        # 创建比赛循环任务，用于检查结束条件
-        asyncio.create_task(self._match_game_loop(group_id, event))
-
-    # 比赛游戏循环 - 用于检查结束条件
-    async def _match_game_loop(self, group_id: str, event: AstrMessageEvent):
-        await asyncio.sleep(2)
-
-        start_time = time.time()
-        last_check = start_time
-        max_questions = self.match_question_limit if self.match_question_limit > 0 else 999999
-        time_limit_seconds = self.match_time_limit * 60 if self.match_time_limit > 0 else 999999999
-
-        # 循环检查比赛结束条件
-        while True:
-            await asyncio.sleep(5)
-
-            # 获取比赛状态
-            match = await self.match_repo.get_active_match(group_id)
-            if not match or not match.is_active:
-                break
-
-            # 检查时间限制
-            if time.time() - start_time > time_limit_seconds:
-                await self.match_repo.end_match(match.match_id)
-                break
-
-            # 检查题目数量限制
-            if match.question_limit > 0:
-                participants = await self.match_repo.get_participants(match.match_id)
-                total_answers = sum(p.correct_count + p.wrong_count for p in participants)
-                if total_answers >= match.question_limit:
-                    await self.match_repo.end_match(match.match_id)
-                    break
-
-            await asyncio.sleep(1)
-
-    # 结束比赛命令
-    @ccl.command("比赛结束")
-    async def match_end(self, event: AstrMessageEvent):
-        """结束比赛"""
-        user_id = str(event.get_sender_id())
-        group_id = str(event.get_group_id() or event.get_sender_id())
-
-        # 检查管理员权限
-        if self.admin_ids and user_id not in [str(x) for x in self.admin_ids]:
-            yield event.plain_result("❌ 只有管理员可以结束比赛")
-            return
-
-        # 获取活跃比赛
-        match = await self.match_repo.get_active_match(group_id)
-        if not match:
-            yield event.plain_result("❌ 当前没有进行中的比赛")
-            return
-
-        match_name = match.match_name
-        match_id = match.match_id
-
-        # 结束比赛
-        await self.match_repo.end_match(match_id)
-
-        # 清理比赛状态
-        if group_id in self.match_question_state:
-            del self.match_question_state[group_id]
-        if group_id in self.match_next_task:
-            if self.match_next_task[group_id]:
-                try:
-                    self.match_next_task[group_id].cancel()
-                except:
-                    pass
-            del self.match_next_task[group_id]
-
-        # 清理玩家数据
-        players_to_remove = [uid for uid, p in self.player.items() if str(p.get("group_id", "")) == group_id]
-        for uid in players_to_remove:
-            del self.player[uid]
-
-        # 获取参赛者列表并排序
-        participants = await self.match_repo.get_participants(match_id)
-        participants.sort(key=lambda p: p.score, reverse=True)
-
-        # 构建排行榜消息
-        msg = f"🏆 比赛「{match_name}」已结束！\n━━━━━━━━━━━━━━\n"
-        msg += "🏆 排行榜\n"
-        for i, p in enumerate(participants[:10], 1):
-            msg += f"{i}. {p.user_name}: {p.correct_count}对/{p.wrong_count}错={p.score:.2f}分\n"
-
-        yield event.plain_result(msg)
-
-        # 保存荣誉记录
-        for i, p in enumerate(participants[:10], 1):
-            await self.match_repo.save_honor(
-                p.user_id, match.match_id, match_name, i,
-                p.correct_count, p.wrong_count, p.score
-            )
-
-    # 比赛排行榜命令
-    @ccl.command("比赛排行")
-    async def match_leaderboard(self, event: AstrMessageEvent):
-        """比赛排行榜"""
-        group_id = str(event.get_group_id() or event.get_sender_id())
-        # 获取活跃比赛
-        match = await self.match_repo.get_active_match(group_id)
-        if not match:
-            yield event.plain_result("❌ 无进行中比赛")
-            return
-
-        # 获取参赛者列表并排序
-        participants = await self.match_repo.get_participants(match.match_id)
-        participants.sort(key=lambda p: p.score, reverse=True)
-
-        # 构建排行榜消息
-        msg = f"🏆 比赛「{match.match_name}」排行榜\n━━━━━━━━━━━━━━\n"
-        for i, p in enumerate(participants[:10], 1):
-            msg += f"{i}. {p.user_name}: {p.correct_count}对/{p.wrong_count}错={p.score:.2f}分\n"
-        yield event.plain_result(msg)
-
+    # ========== 排行榜相关函数 ==========
     # 获取正确个数的排行榜命令
     @ccl.command("排行榜")
     async def correct_answers_leaderboard(self, event: AstrMessageEvent):
@@ -772,6 +580,171 @@ class Mrfzccl(Star):
         except Exception as e:
             yield event.plain_result(f"获取用户信息时出现错误: {str(e)}")
 
+    # ========== 比赛相关函数 ==========
+    # 比赛帮助命令
+    @ccl.command("比赛帮助")
+    async def match_help(self, event: AstrMessageEvent):
+        """比赛模式帮助"""
+        yield event.plain_result("""📋 比赛模式指令帮助
+━━━━━━━━━━━━━━
+/ccl 比赛创建 [名称] - 创建比赛(仅管理员)
+/ccl 比赛开始        - 开始比赛(仅管理员)
+/ccl 比赛结束/结束比赛 - 结束比赛(仅管理员)
+/ccl 比赛排行/排行   - 查看比赛排行榜
+━━━━━━━━━━━━━━""")
+
+    # 创建比赛命令
+    @ccl.command("比赛创建")
+    async def match_create(self, event: AstrMessageEvent, name: str = "", question_limit: int = 0, time_limit: int = 0):
+        """创建比赛（仅管理员）用法: /ccl比赛创建 [名称] [题目限制] [时间限制(分钟)]
+        例如: /ccl春节赛 20 30 表示创建名称为"春节赛"、答完20题自动结束、最多30分钟的比赛
+        题目限制填0表示不限制，时间限制填0表示不限制。比赛开始后，参与答题的用户自动成为参赛者"""
+        user_id = str(event.get_sender_id())
+        group_id = str(event.get_group_id() or event.get_sender_id())
+
+        # 检查管理员权限
+        if self.admin_ids and user_id not in [str(x) for x in self.admin_ids]:
+            yield event.plain_result("❌ 只有管理员可以创建比赛")
+            return
+
+        # 检查是否已有进行中的比赛
+        existing = await self.match_repo.get_active_match(group_id)
+        if existing:
+            yield event.plain_result("❌ 当前群已有进行中的比赛")
+            return
+
+        # 设置题目限制和时间限制
+        q_limit = question_limit if question_limit > 0 else self.match_question_limit
+        t_limit = time_limit if time_limit > 0 else self.match_time_limit
+
+        # 创建比赛名称
+        match_name = name if name else f"比赛_{int(time.time())}"
+        # 创建比赛
+        await self.match_repo.create_match(group_id, match_name, q_limit, t_limit)
+
+        # 构建响应信息
+        info = f"✅ 比赛「{match_name}」已创建！"
+        if q_limit > 0:
+            info += f"\n📝 题目限制: {q_limit}题"
+        if t_limit > 0:
+            info += f"\n⏱️ 时间限制: {t_limit}分钟"
+        info += "\n使用 /fcc 进行答题即可参与比赛"
+        yield event.plain_result(info)
+
+    # 比赛游戏循环
+    @ccl.command("比赛开始")
+    async def match_start(self, event: AstrMessageEvent):
+        """开始比赛（仅管理员）"""
+        user_id = str(event.get_sender_id())
+        group_id = str(event.get_group_id() or event.get_sender_id())
+
+        # 检查管理员权限
+        if self.admin_ids and user_id not in [str(x) for x in self.admin_ids]:
+            yield event.plain_result("❌ 只有管理员可以开始比赛")
+            return
+
+        # 获取活跃比赛
+        match = await self.match_repo.get_active_match(group_id)
+        if not match:
+            yield event.plain_result("❌ 当前没有进行中的比赛")
+            return
+
+        # 开始比赛
+        await self.match_repo.start_match(match.match_id)
+
+        # 初始化第一题
+        result = await self.fc_init(group_id)
+        if result and result != "already_exists":
+            yield event.chain_result([
+                Comp.Plain("🏁 比赛已开始！答题即为参与比赛\n干员立绘,请使用/fcc [干员名称] 进行猜测"),
+                Comp.Image.fromBytes(result)
+            ])
+        else:
+            yield event.plain_result("🏁 比赛已开始！第一题获取失败，请重试")
+
+        # 创建比赛循环任务，用于检查结束条件
+        asyncio.create_task(self._match_game_loop(group_id, event))
+
+    # 结束比赛命令
+    @ccl.command("比赛结束")
+    async def match_end(self, event: AstrMessageEvent):
+        """结束比赛"""
+        user_id = str(event.get_sender_id())
+        group_id = str(event.get_group_id() or event.get_sender_id())
+
+        # 检查管理员权限
+        if self.admin_ids and user_id not in [str(x) for x in self.admin_ids]:
+            yield event.plain_result("❌ 只有管理员可以结束比赛")
+            return
+
+        # 获取活跃比赛
+        match = await self.match_repo.get_active_match(group_id)
+        if not match:
+            yield event.plain_result("❌ 当前没有进行中的比赛")
+            return
+
+        match_name = match.match_name
+        match_id = match.match_id
+
+        # 结束比赛
+        await self.match_repo.end_match(match_id)
+
+        # 清理比赛状态
+        if group_id in self.match_question_state:
+            del self.match_question_state[group_id]
+        if group_id in self.match_next_task:
+            if self.match_next_task[group_id]:
+                try:
+                    self.match_next_task[group_id].cancel()
+                except:
+                    pass
+            del self.match_next_task[group_id]
+
+        # 清理玩家数据
+        players_to_remove = [uid for uid, p in self.player.items() if str(p.get("group_id", "")) == group_id]
+        for uid in players_to_remove:
+            del self.player[uid]
+
+        # 获取参赛者列表并排序
+        participants = await self.match_repo.get_participants(match_id)
+        participants.sort(key=lambda p: p.score, reverse=True)
+
+        # 构建排行榜消息
+        msg = f"🏆 比赛「{match_name}」已结束！\n━━━━━━━━━━━━━━\n"
+        msg += "🏆 排行榜\n"
+        for i, p in enumerate(participants[:10], 1):
+            msg += f"{i}. {p.user_name}: {p.correct_count}对/{p.wrong_count}错={p.score:.2f}分\n"
+
+        yield event.plain_result(msg)
+
+        # 保存荣誉记录
+        for i, p in enumerate(participants[:10], 1):
+            await self.match_repo.save_honor(
+                p.user_id, match.match_id, match_name, i,
+                p.correct_count, p.wrong_count, p.score
+            )
+
+    # 比赛排行榜命令
+    @ccl.command("比赛排行")
+    async def match_leaderboard(self, event: AstrMessageEvent):
+        """比赛排行榜"""
+        group_id = str(event.get_group_id() or event.get_sender_id())
+        # 获取活跃比赛
+        match = await self.match_repo.get_active_match(group_id)
+        if not match:
+            yield event.plain_result("❌ 无进行中比赛")
+            return
+
+        # 获取参赛者列表并排序
+        participants = await self.match_repo.get_participants(match.match_id)
+        participants.sort(key=lambda p: p.score, reverse=True)
+
+        # 构建排行榜消息
+        msg = f"🏆 比赛「{match.match_name}」排行榜\n━━━━━━━━━━━━━━\n"
+        for i, p in enumerate(participants[:10], 1):
+            msg += f"{i}. {p.user_name}: {p.correct_count}对/{p.wrong_count}错={p.score:.2f}分\n"
+        yield event.plain_result(msg)
+
     # 清除用户数据命令
     @ccl.command("清除数据")
     async def reset_user_data(self, event: AstrMessageEvent, target_user_id: str = ""):
@@ -838,8 +811,7 @@ class Mrfzccl(Star):
 
     # 授予用户荣誉命令
     @ccl.command("授予荣誉")
-    async def grant_honor_cmd(self, event: AstrMessageEvent, target_user_id: str = "", rank: int = 1,
-                              match_name: str = "", correct_count: int = 0):
+    async def grant_honor_cmd(self, event: AstrMessageEvent, target_user_id: str = "", rank: int = 1, match_name: str = "", correct_count: int = 0):
         """授予用户特定荣誉（仅管理员）/ccl 授予荣誉 [user_id] [名次] [比赛名称] [答对数量]
         例如: /ccl 授予荣誉 123456 1 测试赛 10"""
         user_id = str(event.get_sender_id())
@@ -881,7 +853,8 @@ class Mrfzccl(Star):
         yield event.plain_result(
             f"✅ 已授予用户 {target_user_id} 荣誉: {medal} {match_name} 第{rank}名, 答对{correct_count}题")
 
-    # ========== 排行榜相关函数 ==========
+    # TODO 移动到src/tool.py
+    # ========== 工具类相关函数 ==========
     # 生成正确量排行榜文本
     def _generate_correct_leaderboard_text(self, users, summary=None):
         """生成正确量排行榜文本"""
@@ -1433,6 +1406,39 @@ class Mrfzccl(Star):
         buf = BytesIO()
         image.save(buf, format=format, optimize=True)  # optimize优化图片大小
         return buf.getvalue()
+
+    # 比赛游戏循环 - 用于检查结束条件
+    async def _match_game_loop(self, group_id: str, event: AstrMessageEvent):
+        await asyncio.sleep(2)
+
+        start_time = time.time()
+        last_check = start_time
+        max_questions = self.match_question_limit if self.match_question_limit > 0 else 999999
+        time_limit_seconds = self.match_time_limit * 60 if self.match_time_limit > 0 else 999999999
+
+        # 循环检查比赛结束条件
+        while True:
+            await asyncio.sleep(5)
+
+            # 获取比赛状态
+            match = await self.match_repo.get_active_match(group_id)
+            if not match or not match.is_active:
+                break
+
+            # 检查时间限制
+            if time.time() - start_time > time_limit_seconds:
+                await self.match_repo.end_match(match.match_id)
+                break
+
+            # 检查题目数量限制
+            if match.question_limit > 0:
+                participants = await self.match_repo.get_participants(match.match_id)
+                total_answers = sum(p.correct_count + p.wrong_count for p in participants)
+                if total_answers >= match.question_limit:
+                    await self.match_repo.end_match(match.match_id)
+                    break
+
+            await asyncio.sleep(1)
 
     # 插件初始化时
     async def initialize(self):
