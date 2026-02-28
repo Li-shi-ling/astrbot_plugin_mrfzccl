@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import Optional
 from sqlmodel import Field, SQLModel
 
+
 class UserQnAStats(SQLModel, table=True):
     """用户问答统计表 - 记录用户的答题统计数据"""
 
@@ -16,6 +17,7 @@ class UserQnAStats(SQLModel, table=True):
     tip_count: int = Field(default=0, description="提示次数")
     created_at: datetime = Field(default_factory=datetime.now, description="创建时间")
     updated_at: datetime = Field(default_factory=datetime.now, description="更新时间")
+
 
 class Match(SQLModel, table=True):
     """比赛表"""
@@ -32,6 +34,7 @@ class Match(SQLModel, table=True):
     started_at: Optional[datetime] = Field(default=None, description="开始时间")
     ended_at: Optional[datetime] = Field(default=None, description="结束时间")
 
+
 class MatchParticipant(SQLModel, table=True):
     """比赛参与者表"""
     __tablename__ = "match_participant"
@@ -45,6 +48,7 @@ class MatchParticipant(SQLModel, table=True):
     wrong_count: int = Field(default=0, description="答错数")
     score: float = Field(default=0.0, description="得分(正确数-错误数*1/3)")
     joined_at: datetime = Field(default_factory=datetime.now)
+
 
 class MatchHonor(SQLModel, table=True):
     """比赛荣誉表"""
