@@ -1,4 +1,5 @@
 from collections import Counter
+from astrbot.api.event import AstrMessageEvent
 
 def calculate_char_coverage_set(correct_name: str, guess_text: str) -> float:
     """
@@ -52,3 +53,15 @@ def calculate_char_coverage_counter(correct_name: str, guess_text: str) -> float
     coverage = matched_chars / total_chars if total_chars > 0 else 0.0
 
     return coverage
+
+def isAdmin(func):
+    async def wrapper(self, event: AstrMessageEvent, *args, **kwargs):
+        user_id = str(event.get_sender_id())
+        # 检查管理员权限
+        if self.admin_ids and user_id not in [str(x) for x in self.admin_ids]:
+            yield event.plain_result("❌ 只有管理员可以查看排行榜")
+            return
+        # 管理员权限，执行原函数
+        async for output in func(self, event, *args, **kwargs):
+            yield output
+    return wrapper

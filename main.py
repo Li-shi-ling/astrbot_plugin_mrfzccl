@@ -5,7 +5,10 @@ from astrbot.api import AstrBotConfig, logger
 from astrbot.api.star import StarTools
 
 from .src.QnAStatsRenderer import QnAStatsRenderer
-from .src.tool import calculate_char_coverage_set
+from .src.tool import (
+    calculate_char_coverage_set,
+    isAdmin
+)
 from .src.db.repo import UserQnARepo, MatchRepo
 from .src.db.database import DBManager
 
@@ -26,6 +29,7 @@ import os
 import re
 
 
+# TODO 发送图片和发送名片改变为图片/文字可选
 # 注册插件，指定插件名、作者、描述和版本号
 @register("mrfzccl", "Lishining", "你知道的,我一直是明日方舟高手", "1.0.0")
 class Mrfzccl(Star):
@@ -450,14 +454,9 @@ class Mrfzccl(Star):
     # ========== 排行榜相关函数 ==========
     # 获取正确个数的排行榜命令
     @ccl.command("排行榜")
+    @isAdmin
     async def correct_answers_leaderboard(self, event: AstrMessageEvent):
         """获取正确个数的排行榜 /ccl 排行榜"""
-        user_id = str(event.get_sender_id())
-        # 检查管理员权限
-        if self.admin_ids and user_id not in [str(x) for x in self.admin_ids]:
-            yield event.plain_result("❌ 只有管理员可以查看排行榜")
-            return
-
         try:
             # 获取排行榜数据（前10名）
             users = await self.user_qna_repo.get_correct_answers_leaderboard(limit=10)
@@ -482,14 +481,9 @@ class Mrfzccl(Star):
 
     # 获取错误个数的排行榜命令
     @ccl.command("错误排行榜")
+    @isAdmin
     async def wrong_answers_leaderboard(self, event: AstrMessageEvent):
         """获取错误个数的排行榜 /ccl 错误排行榜"""
-        user_id = str(event.get_sender_id())
-        # 检查管理员权限
-        if self.admin_ids and user_id not in [str(x) for x in self.admin_ids]:
-            yield event.plain_result("❌ 只有管理员可以查看排行榜")
-            return
-
         try:
             # 获取排行榜数据（前10名）
             users = await self.user_qna_repo.get_wrong_answers_leaderboard(limit=10)
@@ -511,14 +505,9 @@ class Mrfzccl(Star):
 
     # 获取使用提示次数的排行榜命令
     @ccl.command("提示排行榜")
+    @isAdmin
     async def hints_usage_leaderboard(self, event: AstrMessageEvent):
         """获取使用提示次数的排行榜 /ccl 提示排行榜"""
-        user_id = str(event.get_sender_id())
-        # 检查管理员权限
-        if self.admin_ids and user_id not in [str(x) for x in self.admin_ids]:
-            yield event.plain_result("❌ 只有管理员可以查看排行榜")
-            return
-
         try:
             # 获取排行榜数据（前10名）
             users = await self.user_qna_repo.get_hints_usage_leaderboard(limit=10)
@@ -539,6 +528,7 @@ class Mrfzccl(Star):
             yield event.plain_result(f"获取排行榜时出现错误: {str(e)}")
 
     # 获取个人信息获取命令
+    # TODO 修改为图片
     @ccl.command("名片")
     async def user_profile_retrieval(self, event: AstrMessageEvent, user_id: str | None = None):
         """获取个人信息获取 /ccl 名片 [user_id] (如果user_id为空默认为发送人)"""
