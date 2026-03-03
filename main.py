@@ -206,9 +206,8 @@ class Mrfzccl(Star):
             return
 
         # 检查是否在比赛模式和是否限制（仅群聊）
-        if is_group:
-            match = await self.match_repo.get_active_match(str(group_id)) if is_group else None
-            # 非比赛模式下检查每日限制
+        match = await self.match_repo.get_active_match(str(group_id)) if is_group else None
+        # 非比赛模式下检查每日限制
         if not match and not check_daily_limit(user_id, self.daily_counter, self.daily_limit):
             yield event.plain_result(f"今日游戏次数已达上限({self.daily_limit}次)，请明天再来！")
             return
