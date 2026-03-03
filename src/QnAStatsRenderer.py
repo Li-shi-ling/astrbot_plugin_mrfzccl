@@ -44,6 +44,7 @@ class QnAStatsRenderer:
     USER_PROFILE_HONOR_MAX = 5
     USER_PROFILE_HONOR_ROW_HEIGHT = 44
     USER_PROFILE_HONOR_BASE_HEIGHT = 170
+    RETRO_FRAME_EXTRA_HEIGHT = 52
 
     def __init__(self, output_dir: str = "data/quiz_images", theme: str = "light"):
         self.output_dir = Path(output_dir)
@@ -184,6 +185,30 @@ class QnAStatsRenderer:
               --glow2: rgba(245,158,11,0.08);
               --grid: rgba(2,6,23,0.045);
               --stripe: rgba(2,6,23,0.06);
+            }
+            </style>
+            """
+
+        if self.theme in {"retro_win", "retro", "win95", "win"}:
+            return """
+            <style>
+            :root{
+              --bg0:#c5ced1;
+              --bg1:#c5ced1;
+              --panel:#f4f0e6;
+              --panel2:#ffffff;
+              --line:#1a1a1a;
+              --text:#1a1a1a;
+              --muted:#3b3b3b;
+              --accent:#f39800;
+              --accent2:#2c3e50;
+              --good:#1b873f;
+              --bad:#b91c1c;
+              --warn:#f39800;
+              --glow1: rgba(0,0,0,0);
+              --glow2: rgba(0,0,0,0);
+              --grid: rgba(0,0,0,0.10);
+              --stripe: rgba(0,0,0,0.00);
             }
             </style>
             """
@@ -688,6 +713,155 @@ class QnAStatsRenderer:
             border: 1px solid rgba(148,163,184,0.14);
             background: rgba(255,255,255,0.02);
         }
+
+        /* ======================= retro win theme overrides ======================= */
+        body.theme-retro{
+            font-family: "DotGothic16", "MS Gothic", "SimSun", "Microsoft YaHei", Arial, sans-serif;
+            -webkit-font-smoothing: none;
+        }
+        body.theme-retro .content-container{
+            padding: 18px;
+            background-color: var(--bg0);
+            background-image: radial-gradient(rgba(0,0,0,0.12) 0.5px, transparent 0.5px);
+            background-size: 4px 4px;
+        }
+        body.theme-retro .content-container::before{ display:none; }
+
+        body.theme-retro .card{
+            border: 4px solid var(--line);
+            border-radius: 0;
+            padding: 0;
+            background: var(--panel);
+            box-shadow: 12px 12px 0 rgba(0,0,0,0.15);
+        }
+        body.theme-retro .card::before{ display:none; }
+
+        body.theme-retro .retro-top-header{
+            background: var(--line);
+            color: #eee;
+            padding: 4px 12px;
+            font-family: "VT323", "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
+            font-size: 16px;
+            letter-spacing: 1px;
+            display:flex;
+            justify-content: space-between;
+            align-items:center;
+        }
+        body.theme-retro .retro-inner{
+            padding: 18px 18px 12px 18px;
+        }
+
+        body.theme-retro .kicker{
+            font-family: "VT323", "Cascadia Mono", Consolas, monospace;
+            color: var(--text);
+            letter-spacing: 0.14em;
+        }
+        body.theme-retro .title{
+            color: var(--text);
+            -webkit-text-stroke: 1px var(--line);
+            text-shadow: 3px 3px 0px #fff;
+            letter-spacing: -0.02em;
+        }
+        body.theme-retro .divider{
+            height: 10px;
+            border: 2px solid var(--line);
+            background:
+              linear-gradient(90deg,
+                #a8dadc 0%,
+                #a8dadc 16.6%,
+                #457b9d 16.6%,
+                #457b9d 33.2%,
+                #f1faee 33.2%,
+                #f1faee 49.8%,
+                #ffb703 49.8%,
+                #ffb703 66.4%,
+                #fb8500 66.4%,
+                #fb8500 83.0%,
+                #8ecae6 83.0%,
+                #8ecae6 100%);
+            margin: 12px 0 14px 0;
+        }
+
+        body.theme-retro .meta{
+            border: 2px solid var(--line);
+            border-radius: 0;
+            background: #fff;
+        }
+        body.theme-retro .meta-label{ color: var(--muted); }
+        body.theme-retro .meta-value{ color: var(--text); }
+
+        body.theme-retro table.leaderboard thead th{
+            border-bottom: 2px solid var(--line);
+            background: #fff;
+            color: var(--text);
+        }
+        body.theme-retro table.leaderboard tbody td{
+            border-bottom: 1px solid rgba(0,0,0,0.20);
+        }
+        body.theme-retro table.leaderboard tbody tr:nth-child(even){
+            background: rgba(0,0,0,0.03);
+        }
+        body.theme-retro table.leaderboard tbody tr::after{
+            content: none;
+        }
+
+        body.theme-retro .rank,
+        body.theme-retro .avatar-sm,
+        body.theme-retro .avatar{
+            border: 2px solid var(--line);
+            border-radius: 0;
+            background: #fff;
+            color: var(--accent2);
+        }
+
+        body.theme-retro .chip{
+            border: 2px solid var(--line);
+            border-radius: 0;
+            background: #fff;
+            color: var(--muted);
+        }
+
+        body.theme-retro .panel,
+        body.theme-retro .rank-card,
+        body.theme-retro .stat{
+            border: 3px solid var(--line);
+            border-radius: 0;
+            background: #fff;
+        }
+        body.theme-retro .rank-card{
+            border-width: 2px;
+        }
+        body.theme-retro .progress-track{
+            border: 2px solid var(--line);
+            border-radius: 0;
+            background: #fff;
+        }
+        body.theme-retro .progress-fill{
+            border-radius: 0;
+            background: linear-gradient(90deg, var(--accent), rgba(243,152,0,0.25));
+        }
+
+        body.theme-retro table.honors thead th{
+            border-bottom: 2px solid var(--line);
+            background: #fff;
+            color: var(--text);
+        }
+        body.theme-retro table.honors tbody td{
+            border-bottom: 1px solid rgba(0,0,0,0.20);
+        }
+        body.theme-retro table.honors tbody tr:nth-child(even){
+            background: rgba(0,0,0,0.03);
+        }
+
+        body.theme-retro .footer{
+            border-top: 3px solid var(--line);
+            color: var(--muted);
+        }
+        body.theme-retro .footer .tag{
+            border: 2px solid var(--line);
+            border-radius: 0;
+            background: #fff;
+        }
         </style>
         """
 
@@ -705,6 +879,20 @@ class QnAStatsRenderer:
 
     def _build_html(self, body_html: str, title: str) -> str:
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        is_retro = self.theme in {"retro_win", "retro", "win95", "win"}
+        body_class = "theme-retro" if is_retro else ""
+        top_bar = (
+            """
+            <div class="retro-top-header">
+              <span>MRFZCCL // QNA STATS</span>
+              <span>SYSTEM READY_</span>
+            </div>
+            """
+            if is_retro
+            else ""
+        )
+        inner_open = '<div class="retro-inner">' if is_retro else ""
+        inner_close = "</div>" if is_retro else ""
         return f"""
         <!DOCTYPE html>
         <html lang="zh-CN">
@@ -714,15 +902,18 @@ class QnAStatsRenderer:
           {self._theme_css()}
           {self._layout_css()}
         </head>
-        <body>
+        <body class="{body_class}">
           <div class="content-container">
             <div class="page">
               <div class="card">
-                {body_html}
-                <div class="footer">
-                  <span class="tag">Mrfzccl · QnA Stats</span>
-                  <span class="mono">{self._esc(ts)}</span>
-                </div>
+                {top_bar}
+                {inner_open}
+                  {body_html}
+                  <div class="footer">
+                    <span class="tag">Mrfzccl · QnA Stats</span>
+                    <span class="mono">{self._esc(ts)}</span>
+                  </div>
+                {inner_close}
               </div>
             </div>
           </div>
@@ -737,6 +928,8 @@ class QnAStatsRenderer:
         return str(self.output_dir / out)
 
     def render_to_image(self, body_html: str, filename: str, title: str, height: int) -> str:
+        if self.theme in {"retro_win", "retro", "win95", "win"}:
+            height = int(height) + self.RETRO_FRAME_EXTRA_HEIGHT
         html_str = self._build_html(body_html, title)
         return self._html_to_image(html_str, filename, self.CARD_WIDTH, height)
 

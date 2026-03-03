@@ -95,5 +95,11 @@
     "type": "string",
     "default": "./plugin_data",
     "hint": "例如：./plugin_data 或 /path/to/storage"
+  },
+  "renderer_theme": {
+    "description": "问答统计图片主题",
+    "type": "string",
+    "default": "light",
+    "hint": "可选：light(浅色)、industrial(深色)、retro_win(复古Win)"
   }
 }

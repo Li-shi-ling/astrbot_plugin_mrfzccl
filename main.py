@@ -116,9 +116,9 @@ class Mrfzccl(Star):
         self.img_tmp_path = os.path.join(self.storage_dir, "tmp")
         os.makedirs(self.img_tmp_path, exist_ok=True)
         # 初始化问答统计渲染器
-        self.renderer = QnAStatsRenderer(
-            output_dir=self.img_tmp_path
-        )
+        renderer_theme = self.Config.get("renderer_theme", "light")
+        self.renderer = QnAStatsRenderer(output_dir=self.img_tmp_path, theme=renderer_theme)
+        logger.info(f"[Mrfzccl] 渲染主题: {renderer_theme}")
 
         # 设置默认配置
         self.target_size = self.Config.get("target_size", 128)  # 图片目标尺寸
