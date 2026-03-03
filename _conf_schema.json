@@ -81,7 +81,7 @@
     "description": "低权重干员出现概率(0-1)",
     "type": "float",
     "default": 0.2,
-    "hint": "0.2表示20%概率出现低权重干员"
+    "hint": "0.2表示降低该干员出现概率为原本的0.2"
   },
   "require_admin": {
     "description": "排行榜查看指令是否启动管理员限制",

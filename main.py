@@ -176,13 +176,15 @@ class Mrfzccl(Star):
         if not self.is_load:
             yield event.chain_result([
                 Comp.At(qq=event.get_sender_id()),  # @发送者
-                Comp.Plain("插件未加载成功，请联系管理员配置数据文件")
+                Comp.Plain(" 插件未加载成功，请联系管理员配置数据文件")
             ])
             return
 
-        # 获取用户ID和群组ID
-        user_id = str(event.get_group_id() or event.get_sender_id())
-        group_id = str(event.get_group_id() or event.get_sender_id())
+        # 获取用户ID和群组ID（比赛仅在群聊有效）
+        group_id = event.get_group_id()
+        sender_id = str(event.get_sender_id())
+        is_group = group_id is not None
+        user_id = str(group_id) if is_group else sender_id
 
         # 确保数据库初始化
         try:
@@ -191,18 +193,18 @@ class Mrfzccl(Star):
         except Exception as e:
             logger.error(f"[Mrfzccl] 数据库初始化失败: {e}")
             yield event.chain_result([
-                Comp.At(qq=event.get_sender_id()),
-                Comp.Plain("数据库初始化失败，请联系管理员")
+                Comp.At(qq=sender_id),
+                Comp.Plain(" 数据库初始化失败，请联系管理员")
             ])
             return
 
-        # 检查是否在比赛模式
-        match = await self.match_repo.get_active_match(group_id)
-
-        # 非比赛模式下检查每日限制
-        if not match and not self.check_daily_limit(user_id):
-            yield event.plain_result(f"今日游戏次数已达上限({self.daily_limit}次)，请明天再来！")
-            return
+        # 检查是否在比赛模式和是否限制（仅群聊）
+        if is_group:
+            match = await self.match_repo.get_active_match(str(group_id)) if is_group else None
+            # 非比赛模式下检查每日限制
+            if not match and not self.check_daily_limit(user_id):
+                yield event.plain_result(f"今日游戏次数已达上限({self.daily_limit}次)，请明天再来！")
+                return
 
         try:
             # 调用初始化游戏方法
@@ -227,17 +229,16 @@ class Mrfzccl(Star):
     async def fcc(self, event: AstrMessageEvent):
         """进行猜题 /fcc [干员名称]"""
         # 获取群组ID
-        group_id = event.get_group_id()
-        is_group = not group_id is None
-        if is_group:
-            user_id = str(group_id)
-        else:
-            user_id = str(event.get_sender_id())
+        group_id_raw = event.get_group_id()
+        sender_id = str(event.get_sender_id())
+        is_group = group_id_raw is not None
+        group_id = str(group_id_raw) if is_group else None
+        user_id = group_id if is_group else sender_id
 
         logger.debug(f"[fcc] user_id={user_id}, player_keys={list(self.player.keys())}, has_active={self.has_active_game(user_id)}")
 
         # 检查是否有活跃比赛
-        match = await self.match_repo.get_active_match(group_id)
+        match = await self.match_repo.get_active_match(group_id) if is_group else None
 
         # 检查用户是否有活跃游戏
         if not self.has_active_game(user_id):
@@ -251,8 +252,8 @@ class Mrfzccl(Star):
         guess_text = self.extract_and_sanitize_input(event.message_str, "fcc")
         if not guess_text:
             yield event.chain_result([
-                Comp.At(qq=event.get_sender_id()),
-                Comp.Plain("请输入要猜测的干员名称")
+                Comp.At(qq=sender_id),
+                Comp.Plain(" 请输入要猜测的干员名称")
             ])
             return
 
@@ -274,16 +275,14 @@ class Mrfzccl(Star):
         logger.debug(
             f"[答题判断] 正确答案: {correct_name}, 用户回答: {resolved_guess}, 相似度: {similarity:.2f}, 字匹配率: {calculate:.2f}, 同音匹配: {homophone_match}, 阈值: {self.similarity_threshold}/{self.calculate_threshold}, 结果: {is_correct}")
 
-        sender_id = event.get_sender_id()
         sender_name = event.get_sender_name()
 
         # 如果是比赛模式，更新比赛数据
-        if match:
+        if is_group and match:
             await self.match_repo.add_participant(match.match_id, str(sender_id), sender_name)
             if is_correct:
                 await self.match_repo.increment_participant_score(match.match_id, str(sender_id))
                 self.match_question_state[group_id] = time.time()
-
                 # 取消下一个任务的计时器
                 if group_id in self.match_next_task and self.match_next_task[group_id]:
                     try:
@@ -322,15 +321,14 @@ class Mrfzccl(Star):
     @filter.command("fce")
     async def fce(self, event: AstrMessageEvent):
         """强置结束游戏 /fce"""
-        group_id = event.get_group_id()
+        group_id_raw = event.get_group_id()
         sender_id = str(event.get_sender_id())
-        if not group_id is None:
-            user_id = str(group_id)
-        else:
-            user_id = sender_id
+        is_group = group_id_raw is not None
+        group_id = str(group_id_raw) if is_group else None
+        user_id = group_id if is_group else sender_id
 
         # 检查比赛模式下是否有权限
-        match = await self.match_repo.get_active_match(group_id)
+        match = await self.match_repo.get_active_match(group_id) if is_group else None
         if match and self.admin_ids and sender_id not in [str(x) for x in self.admin_ids]:
             yield event.plain_result("❌ 比赛期间只有管理员可以强制结束")
             return
@@ -342,8 +340,8 @@ class Mrfzccl(Star):
 
         answer = self.player[user_id]["name"]  # 获取答案
         chain = [
-            Comp.At(qq=event.get_sender_id()),
-            Comp.Plain(f"游戏已结束,答案为: {answer}")
+            Comp.At(qq=sender_id),
+            Comp.Plain(f" 游戏已结束,答案为: {answer}")
         ]
         yield event.chain_result(chain)
         yield await self.send_original_image(user_id, event)  # 发送原图
@@ -352,12 +350,13 @@ class Mrfzccl(Star):
     @filter.command("fct")
     async def fct(self, event: AstrMessageEvent):
         """获取提示 /fct"""
-        user_id = str(event.get_group_id() or event.get_sender_id())
-        group_id = str(event.get_group_id() or event.get_sender_id())
-
+        group_id = event.get_group_id()
         sender_id = str(event.get_sender_id())
-        # 检查比赛模式下是否有权限
-        match = await self.match_repo.get_active_match(group_id)
+        is_group = group_id is not None
+        user_id = str(group_id) if is_group else sender_id
+
+        # 检查比赛模式下是否有权限（仅群聊）
+        match = await self.match_repo.get_active_match(str(group_id)) if is_group else None
         if match and self.admin_ids and sender_id not in [str(x) for x in self.admin_ids]:
             yield event.plain_result("❌ 比赛期间只有管理员可以使用提示")
             return
@@ -403,12 +402,13 @@ class Mrfzccl(Star):
     @filter.command("fcw")
     async def fcw(self, event: AstrMessageEvent):
         """一次性获取三条提示 /fcw"""
-        user_id = str(event.get_group_id() or event.get_sender_id())
-        group_id = str(event.get_group_id() or event.get_sender_id())
-
+        group_id = event.get_group_id()
         sender_id = str(event.get_sender_id())
-        # 检查比赛模式下是否有权限
-        match = await self.match_repo.get_active_match(group_id)
+        is_group = group_id is not None
+        user_id = str(group_id) if is_group else sender_id
+
+        # 检查比赛模式下是否有权限（仅群聊）
+        match = await self.match_repo.get_active_match(str(group_id)) if is_group else None
         if match and self.admin_ids and sender_id not in [str(x) for x in self.admin_ids]:
             yield event.plain_result("❌ 比赛期间只有管理员可以使用提示")
             return
@@ -445,7 +445,8 @@ class Mrfzccl(Star):
         # 更新用户提示使用次数
         await self.user_qna_repo.increment_tip_count(
             user_id=event.get_sender_id(),
-            user_name=event.get_sender_name()
+            user_name=event.get_sender_name(),
+            increment=3
         )
 
     # ========== ccl 相关指令 ==========
@@ -582,6 +583,8 @@ class Mrfzccl(Star):
     @ccl.command("比赛帮助")
     async def match_help(self, event: AstrMessageEvent):
         """比赛模式帮助"""
+        if event.get_group_id() is None:
+            yield event.plain_result("请在群聊使用")
         yield event.plain_result("""📋 比赛模式指令帮助
 ━━━━━━━━━━━━━━
 /ccl 比赛创建 [名称] - 创建比赛(仅管理员)
@@ -596,8 +599,11 @@ class Mrfzccl(Star):
         """创建比赛（仅管理员）用法: /ccl比赛创建 [名称] [题目限制] [时间限制(分钟)]
         例如: /ccl春节赛 20 30 表示创建名称为"春节赛"、答完20题自动结束、最多30分钟的比赛
         题目限制填0表示不限制，时间限制填0表示不限制。比赛开始后，参与答题的用户自动成为参赛者"""
+        group_id_raw = event.get_group_id()
+        if group_id_raw is None:
+            yield event.plain_result("请在群聊使用")
         user_id = str(event.get_sender_id())
-        group_id = str(event.get_group_id() or event.get_sender_id())
+        group_id = str(group_id_raw)
 
         # 检查管理员权限
         if self.admin_ids and user_id not in [str(x) for x in self.admin_ids]:
@@ -632,8 +638,11 @@ class Mrfzccl(Star):
     @ccl.command("比赛开始")
     async def match_start(self, event: AstrMessageEvent):
         """开始比赛（仅管理员）"""
+        group_id_raw = event.get_group_id()
+        if group_id_raw is None:
+            yield event.plain_result("请在群聊使用")
         user_id = str(event.get_sender_id())
-        group_id = str(event.get_group_id() or event.get_sender_id())
+        group_id = str(group_id_raw)
 
         # 检查管理员权限
         if self.admin_ids and user_id not in [str(x) for x in self.admin_ids]:
@@ -666,8 +675,11 @@ class Mrfzccl(Star):
     @ccl.command("比赛结束")
     async def match_end(self, event: AstrMessageEvent):
         """结束比赛"""
+        group_id_raw = event.get_group_id()
+        if group_id_raw is None:
+            yield event.plain_result("请在群聊使用")
         user_id = str(event.get_sender_id())
-        group_id = str(event.get_group_id() or event.get_sender_id())
+        group_id = str(group_id_raw)
 
         # 检查管理员权限
         if self.admin_ids and user_id not in [str(x) for x in self.admin_ids]:
@@ -725,7 +737,10 @@ class Mrfzccl(Star):
     @ccl.command("比赛排行")
     async def match_leaderboard(self, event: AstrMessageEvent):
         """比赛排行榜"""
-        group_id = str(event.get_group_id() or event.get_sender_id())
+        group_id_raw = event.get_group_id()
+        if group_id_raw is None:
+            yield event.plain_result("请在群聊使用")
+        group_id = str(group_id_raw)
         # 获取活跃比赛
         match = await self.match_repo.get_active_match(group_id)
         if not match:
@@ -1187,7 +1202,7 @@ class Mrfzccl(Star):
             normal_names = [n for n in available_names if n not in low_weight_names]
 
             # 根据权重选择干员
-            if low_weight_names and normal_names and random.random() < self.low_weight_ratio:
+            if low_weight_names and normal_names and random.random() < self.low_weight_ratio * (1 / len(available_names)):
                 random_name = random.choice(low_weight_names)
             else:
                 random_name = random.choice(normal_names) if normal_names else random.choice(available_names)
