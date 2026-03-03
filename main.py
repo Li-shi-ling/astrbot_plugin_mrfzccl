@@ -42,6 +42,9 @@ class Mrfzccl(Star):
         self.is_load = False  # 数据加载标志
         self._shutting_down = False  # 添加关闭标志，用于优雅关闭
 
+        # 是否对排行榜类进行管理员限制
+        self.require_admin = self.Config.get("require_admin", True)
+
         # 提示信息类型映射字典
         self.fct_key = {
             0: "职业及分支",  # 第一个提示：职业

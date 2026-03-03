@@ -53,7 +53,6 @@
     "default": 10,
     "hint": "0表示无限制"
   },
-
   "match_question_limit": {
     "description": "比赛答题数量限制(0表示不限制)",
     "type": "int",
@@ -83,6 +82,12 @@
     "type": "float",
     "default": 0.2,
     "hint": "0.2表示20%概率出现低权重干员"
+  },
+  "require_admin": {
+    "description": "排行榜查看指令是否启动管理员限制",
+    "type": "bool",
+    "default": true,
+    "hint": "true开启,false关闭"
   },
   "character_aliases": {
     "description": "干员别名映射(别名:正名,多组用逗号分隔)",
