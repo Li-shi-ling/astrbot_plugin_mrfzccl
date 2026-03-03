@@ -41,6 +41,15 @@ import re
 # 注册插件，指定插件名、作者、描述和版本号
 @register("mrfzccl", "Lishining", "你知道的,我一直是明日方舟高手", "1.0.0")
 class Mrfzccl(Star):
+    _question_candidate_names: np.ndarray
+    _question_candidate_urls: List[List[str]]
+    _question_candidate_low_idx: np.ndarray
+    _question_candidate_normal_idx: np.ndarray
+    _question_cache_data_id: Optional[int]
+    _question_cache_kw_sig: Optional[tuple]
+    _question_rng: np.random.Generator
+    recent_characters: List[str]
+
     # 插件初始化方法
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context, config)  # 调用父类初始化
