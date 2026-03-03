@@ -31,6 +31,7 @@ import numpy as np
 import traceback
 import asyncio
 import aiohttp
+import ipaddress
 import random
 import json
 import time
@@ -975,52 +976,143 @@ class Mrfzccl(Star):
             if not self.data:
                 logger.error("[extract_questions] 数据未加载")
                 return None
-            names = list(self.data.keys())
-            if not names:
-                logger.error("[extract_questions] 数据为空")
+
+            # ===== 构建候选缓存（一次性扫描，后续 O(1) 抽样）=====
+            cache_data_id = getattr(self, "_question_cache_data_id", None)
+            cache_kw_sig = getattr(self, "_question_cache_kw_sig", None)
+            data_id = id(self.data)
+            kw_sig = tuple(kw for kw in (self.low_weight_keywords or []) if isinstance(kw, str) and kw)
+
+            if (
+                cache_data_id != data_id
+                or cache_kw_sig != kw_sig
+                or not hasattr(self, "_question_candidate_names")
+                or not hasattr(self, "_question_candidate_urls")
+            ):
+                def is_blocked_ip(hostname: Optional[str]) -> bool:
+                    if not hostname:
+                        return True
+                    if str(hostname).strip().lower() == "localhost":
+                        return True
+                    try:
+                        ip = ipaddress.ip_address(hostname)
+                    except ValueError:
+                        return False
+                    return not ip.is_global
+
+                candidate_names: list[str] = []
+                candidate_urls: list[list[str]] = []
+                is_low_weight: list[bool] = []
+
+                low_keywords = [kw.strip() for kw in kw_sig if kw.strip()]
+
+                for name, character_data in self.data.items():
+                    if not isinstance(name, str) or not name:
+                        continue
+                    if not isinstance(character_data, dict):
+                        continue
+                    urls = character_data.get("original_url", None)
+                    if not isinstance(urls, list) or not urls:
+                        continue
+
+                    valid_urls: list[str] = []
+                    for u in urls:
+                        if not isinstance(u, str):
+                            continue
+                        u = u.strip()
+                        if not u or len(u) > 2048:
+                            continue
+                        parsed = urlparse(u)
+                        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                            continue
+                        if is_blocked_ip(parsed.hostname):
+                            continue
+                        valid_urls.append(u)
+
+                    if not valid_urls:
+                        continue
+
+                    candidate_names.append(name)
+                    candidate_urls.append(valid_urls)
+                    is_low_weight.append(any(kw in name for kw in low_keywords))
+
+                if not candidate_names:
+                    logger.error("[extract_questions] 无可用题库（请检查 original_url 配置）")
+                    return None
+
+                self._question_candidate_names = np.array(candidate_names, dtype=object)
+                self._question_candidate_urls = candidate_urls
+                lw_mask = np.array(is_low_weight, dtype=bool)
+                self._question_candidate_low_idx = np.flatnonzero(lw_mask)
+                self._question_candidate_normal_idx = np.flatnonzero(~lw_mask)
+                self._question_cache_data_id = data_id
+                self._question_cache_kw_sig = kw_sig
+
+            # ===== 随机抽题：使用 numpy RNG + 拒绝采样避免扫全表 =====
+            rng = getattr(self, "_question_rng", None)
+            if rng is None:
+                rng = np.random.default_rng()
+                self._question_rng = rng
+
+            names_arr = self._question_candidate_names
+            low_idx = getattr(self, "_question_candidate_low_idx", np.array([], dtype=int))
+            normal_idx = getattr(self, "_question_candidate_normal_idx", np.array([], dtype=int))
+
+            recent_set = set(self.recent_characters or [])
+            # 如果候选数量小于 recent 记录，会导致无法抽到新题：直接清空
+            if len(recent_set) >= len(names_arr):
+                self.recent_characters = []
+                recent_set = set()
+
+            available_count = max(1, len(names_arr) - len(recent_set))
+            try:
+                low_prob = float(self.low_weight_ratio) / float(available_count)
+            except Exception:
+                low_prob = 0.0
+            low_prob = max(0.0, min(1.0, low_prob))
+
+            use_low = low_idx.size > 0 and normal_idx.size > 0 and rng.random() < low_prob
+            primary_pool = low_idx if use_low else (normal_idx if normal_idx.size > 0 else low_idx)
+            secondary_pool = normal_idx if primary_pool is low_idx else low_idx
+            if primary_pool.size == 0:
+                primary_pool = np.arange(len(names_arr), dtype=int)
+                secondary_pool = np.array([], dtype=int)
+
+            def pick_index(pool_arr: np.ndarray) -> Optional[int]:
+                if pool_arr.size == 0:
+                    return None
+                for _ in range(60):
+                    idx = int(pool_arr[int(rng.integers(pool_arr.size))])
+                    if str(names_arr[idx]) not in recent_set:
+                        return idx
+                for idx in pool_arr:
+                    i = int(idx)
+                    if str(names_arr[i]) not in recent_set:
+                        return i
                 return None
 
-            # 过滤最近出现过的干员
-            available_names = [n for n in names if n not in self.recent_characters]
-            if not available_names:
-                available_names = names
+            picked = pick_index(primary_pool)
+            if picked is None:
+                picked = pick_index(secondary_pool)
+            if picked is None:
                 self.recent_characters = []
+                recent_set = set()
+                picked = pick_index(primary_pool)
+                if picked is None:
+                    picked = pick_index(secondary_pool)
+                if picked is None:
+                    picked = int(rng.integers(len(names_arr)))
 
-            # 低权重干员筛选
-            low_weight_names = [n for n in available_names if any(kw in n for kw in self.low_weight_keywords)]
-            normal_names = [n for n in available_names if n not in low_weight_names]
-
-            # 根据权重选择干员
-            if low_weight_names and normal_names and random.random() < self.low_weight_ratio * (1 / len(available_names)):
-                random_name = random.choice(low_weight_names)
-            else:
-                random_name = random.choice(normal_names) if normal_names else random.choice(available_names)
+            random_name = str(names_arr[picked])
+            url_list = self._question_candidate_urls[picked]
+            random_url = url_list[int(rng.integers(len(url_list)))]
 
             # 更新最近干员列表
             self.recent_characters.append(random_name)
             if len(self.recent_characters) > self.max_recent_count:
                 self.recent_characters.pop(0)
 
-            character_data = self.data[random_name]
-            if not isinstance(character_data, dict):
-                logger.error(f"[extract_questions] 角色数据格式错误: {random_name}")
-                return None
-
-            urls = character_data.get("original_url", [])
-            if not urls or not isinstance(urls, list):
-                logger.error(f"[extract_questions] 角色URL数据错误: {random_name}")
-                return None
-
-            random_url = random.choice(urls)
-            if not isinstance(random_url, str) or not random_url.startswith(("http://", "https://")):
-                logger.error(f"[extract_questions] 无效的URL: {random_url}")
-                return None
-
-            return {
-                "name": random_name,
-                "url": random_url,
-                "fctn": 0
-            }
+            return {"name": random_name, "url": random_url, "fctn": 0}
         except (KeyError, IndexError, TypeError) as e:
             logger.error(f"[extract_questions] 提取题目失败: {e}")
             return None
@@ -1050,7 +1142,14 @@ class Mrfzccl(Star):
             parsed_url = urlparse(url)
             hostname = parsed_url.hostname
             if hostname:
-                if hostname.startswith(('10.', '172.16.', '192.168.', '127.', '169.254.', '::1', 'localhost')):
+                hostname_norm = str(hostname).strip().lower()
+                if hostname_norm == "localhost":
+                    raise ValueError(f"禁止访问内网地址: {hostname}")
+                try:
+                    ip = ipaddress.ip_address(hostname_norm)
+                except ValueError:
+                    ip = None
+                if ip and not ip.is_global:
                     raise ValueError(f"禁止访问内网地址: {hostname}")
 
             # 获取HTTP会话
