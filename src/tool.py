@@ -172,6 +172,31 @@ def generate_hints_leaderboard_text(users: Iterable[Any]) -> str:
 
     return message
 
+def generate_match_leaderboard_text(match_name: str, participants: Iterable[Any], ended: bool = False) -> str:
+    """生成比赛排行榜文本（图片生成失败时的回退）"""
+    participants = list(participants or [])
+    if not participants:
+        status = "已结束" if ended else "排行榜"
+        return f"比赛「{match_name}」{status}\n\n暂无参赛记录"
+
+    try:
+        participants.sort(key=lambda p: float(getattr(p, "score", 0.0) or 0.0), reverse=True)
+    except Exception:
+        pass
+
+    title = f"比赛「{match_name}」已结束\n排行榜" if ended else f"比赛「{match_name}」排行榜"
+    message = f"{title}\n----------------\n"
+    for i, p in enumerate(participants[:10], 1):
+        user_name = getattr(p, "user_name", "-")
+        correct = getattr(p, "correct_count", 0)
+        wrong = getattr(p, "wrong_count", 0)
+        try:
+            score_str = f"{float(getattr(p, 'score', 0.0) or 0.0):.2f}"
+        except Exception:
+            score_str = "-"
+        message += f"{i}. {user_name}: {correct}对 {wrong}错 {score_str}分\n"
+    return message
+
 def generate_user_profile_text(user_stats: Any, rank_info: Mapping[str, Any], honors=None, user_id: str | None = None) -> str:
     """生成用户个人信息文本"""
     honors = list(honors or [])

@@ -19,7 +19,7 @@ try:
 except ImportError:
     AIOHTTP_AVAILABLE = False
 
-from .db.tables import MatchHonor, UserQnAStats
+from .db.tables import MatchHonor, MatchParticipant, UserQnAStats
 
 
 class QnAStatsRenderer:
@@ -1048,6 +1048,101 @@ class QnAStatsRenderer:
 
         return head_html + table_html
 
+    def _build_match_leaderboard_body(
+        self,
+        participants: List[MatchParticipant],
+        title: str,
+        avatar_map: Mapping[str, str],
+    ) -> str:
+        sorted_participants = sorted(
+            participants,
+            key=lambda p: float(getattr(p, "score", 0.0) or 0.0),
+            reverse=True,
+        )
+
+        headers = ["排名", "用户", "得分", "正确", "错误", "准确率"]
+
+        head_html = f"""
+        <div class="header">
+          <div>
+            <div class="kicker">MATCH</div>
+            <div class="title">{self._esc(title)}</div>
+          </div>
+          <div class="meta-group">
+            <div class="meta">
+              <div class="meta-label">TOP</div>
+              <div class="meta-value mono">{len(sorted_participants)}</div>
+            </div>
+            <div class="meta">
+              <div class="meta-label">MODE</div>
+              <div class="meta-value">SCORE</div>
+            </div>
+          </div>
+        </div>
+        <div class="divider"></div>
+        """
+
+        th_html = "".join(f"<th>{self._esc(h)}</th>" for h in headers)
+
+        row_html_parts: List[str] = []
+        for idx, p in enumerate(sorted_participants, 1):
+            correct = self._safe_int(getattr(p, "correct_count", 0))
+            wrong = self._safe_int(getattr(p, "wrong_count", 0))
+            total = correct + wrong
+            acc = (correct / total) if total else 0.0
+            acc_pct = acc * 100.0
+
+            try:
+                score_value = float(getattr(p, "score", 0.0) or 0.0)
+                score_str = f"{score_value:.2f}"
+            except Exception:
+                score_str = "-"
+
+            user_name_raw = getattr(p, "user_name", "-")
+            user_id_raw = str(getattr(p, "user_id", "") or "").strip()
+            avatar_data_url = avatar_map.get(user_id_raw)
+            if avatar_data_url:
+                avatar_html = f'<div class="avatar-sm"><img src="{self._esc(avatar_data_url)}" /></div>'
+            else:
+                avatar_html = f'<div class="avatar-sm">{self._esc(self._pick_avatar_char(user_name_raw))}</div>'
+
+            row_class = []
+            if idx == 1:
+                row_class.append("top1")
+            row_class_str = f' class="{" ".join(row_class)}"' if row_class else ""
+
+            rank_cell = f'<td class="col-rank">{self._rank_badge(idx)}</td>'
+            user_cell = f"""
+              <td class="col-user">
+                <div class="user">{avatar_html}<span class="name">{self._esc(user_name_raw)}</span></div>
+              </td>
+            """
+
+            cells = [
+                f'<td class="mono num-accent">{self._esc(score_str)}</td>',
+                f'<td class="mono num-good">{self._fmt_int(correct)}</td>',
+                f'<td class="mono num-bad">{self._fmt_int(wrong)}</td>',
+                self._acc_cell_html(acc_pct),
+            ]
+
+            row_html = (
+                f'<tr{row_class_str} style="--acc:{acc:.4f};">'
+                f"{rank_cell}{user_cell}{''.join(cells)}"
+                "</tr>"
+            )
+            row_html_parts.append(row_html)
+
+        table_html = f"""
+        <table class="leaderboard">
+          <thead><tr>{th_html}</tr></thead>
+          <tbody>
+            {''.join(row_html_parts)}
+          </tbody>
+        </table>
+        """
+
+        return head_html + table_html
+
     def _acc_cell_html(self, acc_pct: float) -> str:
         safe_pct = max(0.0, min(100.0, float(acc_pct)))
         return f"""
@@ -1116,6 +1211,24 @@ class QnAStatsRenderer:
         return await loop.run_in_executor(
             None,
             lambda: self.render_to_image(body, name, "提示次数排行榜", height),
+        )
+
+    async def generate_match_leaderboard_image(
+        self,
+        match_name: str,
+        participants: List[MatchParticipant],
+        title: Optional[str] = None,
+    ) -> str:
+        participants = list(participants or [])
+        title_text = title or f"比赛「{match_name}」排行榜"
+        avatar_map = await self._download_avatar_map([getattr(p, "user_id", "") for p in participants])
+        body = self._build_match_leaderboard_body(participants, title_text, avatar_map)
+        height = self._calc_table_height(len(participants))
+        name = f"match_leaderboard_{datetime.now():%Y%m%d_%H%M%S}"
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: self.render_to_image(body, name, title_text, height),
         )
 
     async def generate_user_profile_image(

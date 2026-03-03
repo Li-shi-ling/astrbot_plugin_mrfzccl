@@ -12,6 +12,7 @@ from .src.tool import (
     generate_correct_leaderboard_text,
     generate_hints_leaderboard_text,
     generate_image_or_fallback,
+    generate_match_leaderboard_text,
     generate_user_profile_text,
     generate_wrong_leaderboard_text,
     has_active_game,
@@ -726,16 +727,22 @@ class Mrfzccl(Star):
         participants = await self.match_repo.get_participants(match_id)
         participants.sort(key=lambda p: p.score, reverse=True)
 
-        # 构建排行榜消息
-        msg = f"🏆 比赛「{match_name}」已结束！\n━━━━━━━━━━━━━━\n"
-        msg += "🏆 排行榜\n"
-        for i, p in enumerate(participants[:10], 1):
-            msg += f"{i}. {p.user_name}: {p.correct_count}对/{p.wrong_count}错={p.score:.2f}分\n"
+        top_participants = participants[:10]
 
-        yield event.plain_result(msg)
+        # 使用统一的图片/文本生成函数（与排行榜等指令一致）
+        async for result in generate_image_or_fallback(
+            event=event,
+            generate_image_func=lambda: self.renderer.generate_match_leaderboard_image(
+                match_name,
+                top_participants,
+                title=f"比赛「{match_name}」已结束排行榜",
+            ),
+            generate_text_func=lambda: generate_match_leaderboard_text(match_name, top_participants, ended=True),
+        ):
+            yield result
 
         # 保存荣誉记录
-        for i, p in enumerate(participants[:10], 1):
+        for i, p in enumerate(top_participants, 1):
             await self.match_repo.save_honor(
                 p.user_id, match.match_id, match_name, i,
                 p.correct_count, p.wrong_count, p.score
@@ -760,11 +767,17 @@ class Mrfzccl(Star):
         participants = await self.match_repo.get_participants(match.match_id)
         participants.sort(key=lambda p: p.score, reverse=True)
 
-        # 构建排行榜消息
-        msg = f"🏆 比赛「{match.match_name}」排行榜\n━━━━━━━━━━━━━━\n"
-        for i, p in enumerate(participants[:10], 1):
-            msg += f"{i}. {p.user_name}: {p.correct_count}对/{p.wrong_count}错={p.score:.2f}分\n"
-        yield event.plain_result(msg)
+        top_participants = participants[:10]
+
+        async for result in generate_image_or_fallback(
+            event=event,
+            generate_image_func=lambda: self.renderer.generate_match_leaderboard_image(
+                match.match_name,
+                top_participants,
+            ),
+            generate_text_func=lambda: generate_match_leaderboard_text(match.match_name, top_participants),
+        ):
+            yield result
 
     # 清除用户数据命令
     @ccl.command("清除数据")
