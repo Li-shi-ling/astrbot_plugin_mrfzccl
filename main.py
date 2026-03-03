@@ -528,44 +528,48 @@ class Mrfzccl(Star):
             yield event.plain_result(f"获取排行榜时出现错误: {str(e)}")
 
     # 获取个人信息获取命令
-    # TODO 修改为图片
     @ccl.command("名片")
     async def user_profile_retrieval(self, event: AstrMessageEvent, user_id: str | None = None):
         """获取个人信息获取 /ccl 名片 [user_id] (如果user_id为空默认为发送人)"""
         try:
+            # 确定用户ID
             target_user_id = user_id or event.get_sender_id()
 
-            # 获取用户统计信息和排名信息
+            # 获取用户信息及排名
             user_stats, rank_info = await self.user_qna_repo.get_user_profile_with_rank(target_user_id)
-
-            if not user_stats and user_id:
-                yield event.plain_result("❌ 未找到该用户的答题记录")
-                return
 
             # 获取用户荣誉
             honors = await self.match_repo.get_user_honors(str(target_user_id))
 
-            # 构建用户信息消息
-            msg = f"👤 用户 {target_user_id}\n━━━━━━━━━━━━━━\n"
-            if user_stats:
-                total_attempts = user_stats.correct_count + user_stats.wrong_count
-                msg += f"✅ 答对: {user_stats.correct_count}题\n"
-                msg += f"📝 总答题: {total_attempts}题\n"
-                msg += f"🎯 正确率: {user_stats.correct_count * 100 // max(total_attempts, 1)}%\n"
-                if rank_info:
-                    msg += f"🏆 排名: 第{rank_info.get('rank', '?')}名\n"
-            else:
-                msg += "暂无答题记录\n"
+            # 没有任何记录时直接返回
+            if not user_stats and not honors:
+                yield event.plain_result("❌ 未找到该用户的答题记录")
+                return
 
-            # 添加荣誉记录
-            if honors:
-                msg += "\n🏅 荣誉记录\n"
-                for h in honors[:5]:
-                    msg += f"  {h.medal} {h.match_name}: 第{h.rank}名\n"
-            else:
-                msg += "\n暂无荣誉记录\n"
+            # 没有答题记录但有荣誉：直接用文本输出（名片图片依赖 user_stats）
+            if not user_stats:
+                yield event.plain_result(
+                    self._generate_user_profile_text(
+                        user_stats=user_stats,
+                        rank_info=rank_info,
+                        honors=honors,
+                        user_id=str(target_user_id),
+                    )
+                )
+                return
 
-            yield event.plain_result(msg)
+            # 使用统一的图片/文本生成函数
+            async for result in self._generate_image_or_fallback(
+                event=event,
+                generate_image_func=lambda: self.renderer.generate_user_profile_image(user_stats, rank_info, honors),
+                generate_text_func=lambda: self._generate_user_profile_text(
+                    user_stats=user_stats,
+                    rank_info=rank_info,
+                    honors=honors,
+                    user_id=str(target_user_id),
+                ),
+            ):
+                yield result
 
         except Exception as e:
             yield event.plain_result(f"获取用户信息时出现错误: {str(e)}")
@@ -945,36 +949,56 @@ class Mrfzccl(Star):
         return message
 
     # 生成用户个人信息文本
-    def _generate_user_profile_text(self, user_stats, rank_info):
+    def _generate_user_profile_text(self, user_stats, rank_info, honors=None, user_id: str | None = None):
         """生成用户个人信息文本"""
-        if not user_stats:
-            return "❌ 未找到该用户的答题记录"
+        honors = list(honors or [])
 
         # 构建个人信息消息
-        message = f"👤 **用户信息 - {user_stats.user_name}**\n\n"
+        title = user_stats.user_name if user_stats else (user_id or "未知用户")
+        message = f"👤 **用户信息 - {title}**\n\n"
 
-        # 基础统计
-        total_answers = user_stats.correct_count + user_stats.wrong_count
-        accuracy = (user_stats.correct_count / total_answers * 100) if total_answers > 0 else 0
+        if not user_stats:
+            message += "📊 **基础统计**\n"
+            message += "暂无答题记录\n"
+        else:
+            # 基础统计
+            total_answers = user_stats.correct_count + user_stats.wrong_count
+            accuracy = (user_stats.correct_count / total_answers * 100) if total_answers > 0 else 0
 
-        message += f"📊 **基础统计**\n"
-        message += f"✅ 正确: {user_stats.correct_count}\n"
-        message += f"❌ 错误: {user_stats.wrong_count}\n"
-        message += f"💡 提示: {user_stats.tip_count}\n"
-        message += f"🎯 准确率: {accuracy:.1f}%\n"
-        message += f"📝 总答题数: {total_answers}\n\n"
+            message += f"📊 **基础统计**\n"
+            message += f"✅ 正确: {user_stats.correct_count}\n"
+            message += f"❌ 错误: {user_stats.wrong_count}\n"
+            message += f"💡 提示: {user_stats.tip_count}\n"
+            message += f"🎯 准确率: {accuracy:.1f}%\n"
+            message += f"📝 总答题数: {total_answers}\n\n"
 
-        # 排名信息
-        if rank_info:
-            message += f"🏆 **排名信息** (共{rank_info.get('total_users', '?')}人)\n"
-            message += f"✅ 正确排名: 第{rank_info.get('correct_rank', '?')}名\n"
-            message += f"❌ 错误排名: 第{rank_info.get('wrong_rank', '?')}名\n"
-            message += f"💡 提示排名: 第{rank_info.get('tip_rank', '?')}名\n\n"
+            # 排名信息
+            if rank_info:
+                message += f"🏆 **排名信息** (共{rank_info.get('total_users', '?')}人)\n"
+                message += f"✅ 正确排名: 第{rank_info.get('correct_rank', '?')}名\n"
+                message += f"❌ 错误排名: 第{rank_info.get('wrong_rank', '?')}名\n"
+                message += f"💡 提示排名: 第{rank_info.get('tip_rank', '?')}名\n\n"
 
-        # 时间信息
-        message += f"📅 **时间信息**\n"
-        message += f"⏰ 注册时间: {user_stats.created_at.strftime('%Y-%m-%d %H:%M')}\n"
-        message += f"🔄 最后更新: {user_stats.updated_at.strftime('%Y-%m-%d %H:%M')}\n"
+            # 时间信息
+            message += f"📅 **时间信息**\n"
+            message += f"⏰ 注册时间: {user_stats.created_at.strftime('%Y-%m-%d %H:%M')}\n"
+            message += f"🔄 最后更新: {user_stats.updated_at.strftime('%Y-%m-%d %H:%M')}\n"
+
+        # 荣誉记录
+        if honors:
+            message += f"\n🏅 **比赛荣誉**\n"
+            for h in honors[:5]:
+                try:
+                    score_str = f"{float(getattr(h, 'score', 0.0)):.1f}"
+                except Exception:
+                    score_str = "-"
+                message += (
+                    f"{getattr(h, 'medal', '')} {getattr(h, 'match_name', '-')}: "
+                    f"第{getattr(h, 'rank', '?')}名（✅{getattr(h, 'correct_count', 0)}/"
+                    f"❌{getattr(h, 'wrong_count', 0)}，S{score_str}）\n"
+                )
+        else:
+            message += "\n暂无荣誉记录\n"
 
         return message
 

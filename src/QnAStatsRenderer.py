@@ -19,7 +19,7 @@ try:
 except ImportError:
     AIOHTTP_AVAILABLE = False
 
-from .db.tables import UserQnAStats
+from .db.tables import MatchHonor, UserQnAStats
 
 
 class QnAStatsRenderer:
@@ -41,6 +41,9 @@ class QnAStatsRenderer:
     SAFE_PADDING = 120
 
     USER_PROFILE_HEIGHT = 580
+    USER_PROFILE_HONOR_MAX = 5
+    USER_PROFILE_HONOR_ROW_HEIGHT = 44
+    USER_PROFILE_HONOR_BASE_HEIGHT = 170
 
     def __init__(self, output_dir: str = "data/quiz_images", theme: str = "light"):
         self.output_dir = Path(output_dir)
@@ -457,6 +460,37 @@ class QnAStatsRenderer:
             color: var(--muted);
             white-space: nowrap;
         }
+
+        table.honors{
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            overflow: hidden;
+        }
+        table.honors thead th{
+            height: 38px;
+            padding: 8px 10px;
+            font-size: 11px;
+            letter-spacing: 0.10em;
+            text-transform: uppercase;
+            color: var(--muted);
+            border-bottom: 1px solid var(--line);
+            background: rgba(255,255,255,0.02);
+        }
+        table.honors tbody td{
+            height: 44px;
+            padding: 10px 10px;
+            border-bottom: 1px solid rgba(148,163,184,0.10);
+            font-size: 14px;
+            vertical-align: middle;
+        }
+        table.honors tbody tr:nth-child(even){
+            background: rgba(255,255,255,0.02);
+        }
+        .col-medal{ width: 72px; }
+        .col-rank2{ width: 90px; text-align:right; }
+        .col-score{ width: 220px; text-align:right; }
+        .honor-medal{ font-size: 18px; }
 
         .acc{
             display:flex;
@@ -891,22 +925,82 @@ class QnAStatsRenderer:
             lambda: self.render_to_image(body, name, "提示次数排行榜", height),
         )
 
-    async def generate_user_profile_image(self, user_stats: UserQnAStats, rank_info: Mapping[str, Any]) -> str:
+    async def generate_user_profile_image(
+        self,
+        user_stats: UserQnAStats,
+        rank_info: Mapping[str, Any],
+        honors: Optional[List[MatchHonor]] = None,
+    ) -> str:
         avatar_map = await self._download_avatar_map([getattr(user_stats, "user_id", "")])
         avatar_data_url = avatar_map.get(str(getattr(user_stats, "user_id", "") or "").strip())
-        body = self._build_user_profile_body_with_avatar(user_stats, rank_info, avatar_data_url)
+        honor_list = list(honors or [])[: self.USER_PROFILE_HONOR_MAX]
+        body = self._build_user_profile_body_with_avatar(user_stats, rank_info, avatar_data_url, honor_list)
         name = f"user_profile_{getattr(user_stats, 'user_id', 'unknown')}_{datetime.now():%Y%m%d_%H%M%S}"
+        height = self.USER_PROFILE_HEIGHT
+        if honor_list:
+            height += self.USER_PROFILE_HONOR_BASE_HEIGHT + len(honor_list) * self.USER_PROFILE_HONOR_ROW_HEIGHT
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
             None,
-            lambda: self.render_to_image(body, name, "用户信息", self.USER_PROFILE_HEIGHT),
+            lambda: self.render_to_image(body, name, "用户信息", height),
         )
+
+    def _build_user_honor_section(self, honors: List[MatchHonor]) -> str:
+        if not honors:
+            return ""
+
+        row_html_parts: List[str] = []
+        for h in honors[: self.USER_PROFILE_HONOR_MAX]:
+            medal = getattr(h, "medal", "")
+            match_name = getattr(h, "match_name", "-")
+            rank = getattr(h, "rank", "-")
+
+            correct = self._safe_int(getattr(h, "correct_count", 0))
+            wrong = self._safe_int(getattr(h, "wrong_count", 0))
+            score = getattr(h, "score", 0.0)
+            try:
+                score_str = f"{float(score):.1f}"
+            except Exception:
+                score_str = "-"
+
+            row_html_parts.append(
+                f"""
+                <tr>
+                  <td class="col-medal"><span class="honor-medal">{self._esc(medal)}</span></td>
+                  <td><span class="name">{self._esc(match_name)}</span></td>
+                  <td class="mono col-rank2">#{self._esc(rank)}</td>
+                  <td class="mono col-score"><span class="num-good">{self._fmt_int(correct)}</span>/<span class="num-bad">{self._fmt_int(wrong)}</span> <span class="chip">S {self._esc(score_str)}</span></td>
+                </tr>
+                """
+            )
+
+        rows_html = "".join(row_html_parts)
+        return f"""
+        <div class="divider"></div>
+        <div class="panel honor-panel">
+          <div class="panel-title">比赛荣誉</div>
+          <table class="honors">
+            <thead>
+              <tr>
+                <th class="col-medal">奖牌</th>
+                <th>比赛</th>
+                <th class="col-rank2">名次</th>
+                <th class="col-score">战绩</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows_html}
+            </tbody>
+          </table>
+        </div>
+        """
 
     def _build_user_profile_body_with_avatar(
         self,
         u: UserQnAStats,
         rank: Mapping[str, Any],
         avatar_data_url: Optional[str],
+        honors: Optional[List[MatchHonor]] = None,
     ) -> str:
         user_name_raw = getattr(u, "user_name", "-")
         user_id_raw = getattr(u, "user_id", "-")
@@ -932,6 +1026,8 @@ class QnAStatsRenderer:
             if avatar_data_url
             else f'<div class="avatar">{self._esc(avatar_char)}</div>'
         )
+
+        honor_section = self._build_user_honor_section(list(honors or []))
 
         return f"""
         <div class="profile-head">
@@ -980,4 +1076,5 @@ class QnAStatsRenderer:
             </div>
           </div>
         </div>
+        {honor_section}
         """
