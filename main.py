@@ -7,13 +7,22 @@ from astrbot.api.star import StarTools
 from .src.QnAStatsRenderer import QnAStatsRenderer
 from .src.tool import (
     calculate_char_coverage_set,
-    isAdmin
+    check_daily_limit,
+    check_homophone,
+    generate_correct_leaderboard_text,
+    generate_hints_leaderboard_text,
+    generate_image_or_fallback,
+    generate_user_profile_text,
+    generate_wrong_leaderboard_text,
+    has_active_game,
+    isAdmin,
+    parse_aliases,
+    resolve_alias,
 )
 from .src.db.repo import UserQnARepo, MatchRepo
 from .src.db.database import DBManager
 
 from typing import Optional, Dict, Any, Tuple, List
-from pypinyin import lazy_pinyin, Style
 from difflib import SequenceMatcher
 from urllib.parse import urlparse
 from io import BytesIO
@@ -28,8 +37,6 @@ import time
 import os
 import re
 
-
-# TODO 发送图片和发送名片改变为图片/文字可选
 # 注册插件，指定插件名、作者、描述和版本号
 @register("mrfzccl", "Lishining", "你知道的,我一直是明日方舟高手", "1.0.0")
 class Mrfzccl(Star):
@@ -202,9 +209,9 @@ class Mrfzccl(Star):
         if is_group:
             match = await self.match_repo.get_active_match(str(group_id)) if is_group else None
             # 非比赛模式下检查每日限制
-            if not match and not self.check_daily_limit(user_id):
-                yield event.plain_result(f"今日游戏次数已达上限({self.daily_limit}次)，请明天再来！")
-                return
+        if not match and not check_daily_limit(user_id, self.daily_counter, self.daily_limit):
+            yield event.plain_result(f"今日游戏次数已达上限({self.daily_limit}次)，请明天再来！")
+            return
 
         try:
             # 调用初始化游戏方法
@@ -235,13 +242,13 @@ class Mrfzccl(Star):
         group_id = str(group_id_raw) if is_group else None
         user_id = group_id if is_group else sender_id
 
-        logger.debug(f"[fcc] user_id={user_id}, player_keys={list(self.player.keys())}, has_active={self.has_active_game(user_id)}")
+        logger.debug(f"[fcc] user_id={user_id}, player_keys={list(self.player.keys())}, has_active={has_active_game(self.player, user_id)}")
 
         # 检查是否有活跃比赛
         match = await self.match_repo.get_active_match(group_id) if is_group else None
 
         # 检查用户是否有活跃游戏
-        if not self.has_active_game(user_id):
+        if not has_active_game(self.player, user_id):
             if match:
                 yield event.plain_result("比赛期间请等待管理员发送题目")
             else:
@@ -260,14 +267,14 @@ class Mrfzccl(Star):
         correct_name = self.player[user_id]["name"]  # 获取正确答案
 
         # 解析别名（将用户输入的别名转换为正式名称）
-        resolved_guess = self.resolve_alias(guess_text)
+        resolved_guess = resolve_alias(guess_text, self.alias_map)
 
         # 计算相似度
         similarity = SequenceMatcher(None, correct_name, resolved_guess).ratio()
         # 计算字符覆盖率
         calculate = calculate_char_coverage_set(correct_name, resolved_guess)
         # 检查是否为同音字
-        homophone_match = self.check_homophone(correct_name, resolved_guess)
+        homophone_match = check_homophone(correct_name, resolved_guess, enable_homophone=self.enable_homophone)
         # 综合判断是否正确
         is_correct = (similarity > self.similarity_threshold) or (
                     calculate > self.calculate_threshold) or homophone_match
@@ -334,7 +341,7 @@ class Mrfzccl(Star):
             return
 
         # 检查是否有活跃游戏
-        if not self.has_active_game(user_id):
+        if not has_active_game(self.player, user_id):
             yield event.plain_result("没有初始化房间,请使用/fc")
             return
 
@@ -362,7 +369,7 @@ class Mrfzccl(Star):
             return
 
         # 检查是否有活跃游戏
-        if not self.has_active_game(user_id):
+        if not has_active_game(self.player, user_id):
             yield event.plain_result("没有初始化房间,请使用/fc")
             return
 
@@ -414,7 +421,7 @@ class Mrfzccl(Star):
             return
 
         # 检查是否有活跃游戏
-        if not self.has_active_game(user_id):
+        if not has_active_game(self.player, user_id):
             yield event.plain_result("没有初始化房间,请使用/fc")
             return
 
@@ -473,10 +480,10 @@ class Mrfzccl(Star):
             summary = await self.user_qna_repo.get_leaderboard_summary()
 
             # 使用统一的图片/文本生成函数
-            async for result in self._generate_image_or_fallback(
+            async for result in generate_image_or_fallback(
                     event=event,
                     generate_image_func=lambda: self.renderer.generate_correct_leaderboard_image(users),
-                    generate_text_func=lambda: self._generate_correct_leaderboard_text(users, summary),
+                    generate_text_func=lambda: generate_correct_leaderboard_text(users, summary),
             ):
                 yield result
 
@@ -497,10 +504,10 @@ class Mrfzccl(Star):
                 return
 
             # 使用统一的图片/文本生成函数
-            async for result in self._generate_image_or_fallback(
+            async for result in generate_image_or_fallback(
                     event=event,
                     generate_image_func=lambda: self.renderer.generate_wrong_leaderboard_image(users),
-                    generate_text_func=lambda: self._generate_wrong_leaderboard_text(users),
+                    generate_text_func=lambda: generate_wrong_leaderboard_text(users),
             ):
                 yield result
 
@@ -521,10 +528,10 @@ class Mrfzccl(Star):
                 return
 
             # 使用统一的图片/文本生成函数
-            async for result in self._generate_image_or_fallback(
+            async for result in generate_image_or_fallback(
                     event=event,
                     generate_image_func=lambda: self.renderer.generate_hints_leaderboard_image(users),
-                    generate_text_func=lambda: self._generate_hints_leaderboard_text(users),
+                    generate_text_func=lambda: generate_hints_leaderboard_text(users),
             ):
                 yield result
 
@@ -552,26 +559,14 @@ class Mrfzccl(Star):
 
             # 没有答题记录但有荣誉：直接用文本输出（名片图片依赖 user_stats）
             if not user_stats:
-                yield event.plain_result(
-                    self._generate_user_profile_text(
-                        user_stats=user_stats,
-                        rank_info=rank_info,
-                        honors=honors,
-                        user_id=str(target_user_id),
-                    )
-                )
+                yield event.plain_result(generate_user_profile_text(user_stats, rank_info, honors, str(target_user_id)))
                 return
 
             # 使用统一的图片/文本生成函数
-            async for result in self._generate_image_or_fallback(
+            async for result in generate_image_or_fallback(
                 event=event,
                 generate_image_func=lambda: self.renderer.generate_user_profile_image(user_stats, rank_info, honors),
-                generate_text_func=lambda: self._generate_user_profile_text(
-                    user_stats=user_stats,
-                    rank_info=rank_info,
-                    honors=honors,
-                    user_id=str(target_user_id),
-                ),
+                generate_text_func=lambda: generate_user_profile_text(user_stats, rank_info, honors, str(target_user_id)),
             ):
                 yield result
 
@@ -585,6 +580,7 @@ class Mrfzccl(Star):
         """比赛模式帮助"""
         if event.get_group_id() is None:
             yield event.plain_result("请在群聊使用")
+            return
         yield event.plain_result("""📋 比赛模式指令帮助
 ━━━━━━━━━━━━━━
 /ccl 比赛创建 [名称] - 创建比赛(仅管理员)
@@ -602,6 +598,7 @@ class Mrfzccl(Star):
         group_id_raw = event.get_group_id()
         if group_id_raw is None:
             yield event.plain_result("请在群聊使用")
+            return
         user_id = str(event.get_sender_id())
         group_id = str(group_id_raw)
 
@@ -641,6 +638,7 @@ class Mrfzccl(Star):
         group_id_raw = event.get_group_id()
         if group_id_raw is None:
             yield event.plain_result("请在群聊使用")
+            return
         user_id = str(event.get_sender_id())
         group_id = str(group_id_raw)
 
@@ -678,6 +676,7 @@ class Mrfzccl(Star):
         group_id_raw = event.get_group_id()
         if group_id_raw is None:
             yield event.plain_result("请在群聊使用")
+            return
         user_id = str(event.get_sender_id())
         group_id = str(group_id_raw)
 
@@ -740,6 +739,7 @@ class Mrfzccl(Star):
         group_id_raw = event.get_group_id()
         if group_id_raw is None:
             yield event.plain_result("请在群聊使用")
+            return
         group_id = str(group_id_raw)
         # 获取活跃比赛
         match = await self.match_repo.get_active_match(group_id)
@@ -865,182 +865,7 @@ class Mrfzccl(Star):
         yield event.plain_result(
             f"✅ 已授予用户 {target_user_id} 荣誉: {medal} {match_name} 第{rank}名, 答对{correct_count}题")
 
-    # TODO 移动到src/tool.py
     # ========== 工具类相关函数 ==========
-    # 生成正确量排行榜文本
-    def _generate_correct_leaderboard_text(self, users, summary=None):
-        """生成正确量排行榜文本"""
-        if not users:
-            return "📊 当前还没有用户的答题记录哦~"
-
-        message = "🏆 **正确量排行榜** 🏆\n\n"
-
-        # 遍历用户并生成排行榜
-        for i, user in enumerate(users, 1):
-            # 根据排名分配奖牌
-            if i == 1:
-                medal = "🥇"
-            elif i == 2:
-                medal = "🥈"
-            elif i == 3:
-                medal = "🥉"
-            else:
-                medal = f"{i}."
-
-            # 计算准确率
-            total_answers = user.correct_count + user.wrong_count
-            accuracy = (user.correct_count / total_answers * 100) if total_answers > 0 else 0
-
-            message += f"{medal} {user.user_name}\n"
-            message += f"   ✅ 正确: {user.correct_count} | ❌ 错误: {user.wrong_count} | 💡 提示: {user.tip_count}\n"
-            message += f"   📈 准确率: {accuracy:.1f}% | 📅 最后更新: {user.updated_at.strftime('%Y-%m-%d')}\n\n"
-
-        # 添加统计信息（如果提供了summary）
-        if summary:
-            message += f"📊 **统计信息**\n"
-            message += f"总用户数: {summary['total_users']} | 总答题数: {summary['total_questions']}\n"
-            message += f"总正确数: {summary['total_correct']} | 总错误数: {summary['total_wrong']}\n"
-            message += f"平均正确数: {summary['avg_correct']:.1f}"
-
-        return message
-
-    # 生成错误个数排行榜文本
-    def _generate_wrong_leaderboard_text(self, users):
-        """生成错误个数排行榜文本"""
-        if not users:
-            return "📊 当前还没有用户的答题记录哦~"
-
-        message = "💥 **错误个数排行榜** 💥\n\n"
-
-        # 遍历用户并生成排行榜
-        for i, user in enumerate(users, 1):
-            # 根据排名分配表情
-            medal = ""
-            if i == 1:
-                medal = "💣"  # 炸弹表示错误最多
-            elif i == 2:
-                medal = "🧨"
-            elif i == 3:
-                medal = "🎆"
-            else:
-                medal = f"{i}."
-
-            # 计算错误率
-            total_answers = user.correct_count + user.wrong_count
-            error_rate = (user.wrong_count / total_answers * 100) if total_answers > 0 else 0
-
-            message += f"{medal} {user.user_name}\n"
-            message += f"   ❌ 错误: {user.wrong_count} | ✅ 正确: {user.correct_count} | 💡 提示: {user.tip_count}\n"
-            message += f"   📉 错误率: {error_rate:.1f}% | 📅 最后更新: {user.updated_at.strftime('%Y-%m-%d')}\n\n"
-
-        return message
-
-    # 生成提示次数排行榜文本
-    def _generate_hints_leaderboard_text(self, users):
-        """生成提示次数排行榜文本"""
-        if not users:
-            return "📊 当前还没有用户的答题记录哦~"
-
-        message = "💡 **提示次数排行榜** 💡\n\n"
-
-        # 遍历用户并生成排行榜
-        for i, user in enumerate(users, 1):
-            # 根据排名分配表情
-            medal = ""
-            if i == 1:
-                medal = "🎯"  # 靶心表示最依赖提示
-            elif i == 2:
-                medal = "🔍"
-            elif i == 3:
-                medal = "🧩"
-            else:
-                medal = f"{i}."
-
-            # 计算提示频率（每道题平均提示次数）
-            total_answers = user.correct_count + user.wrong_count
-            tips_per_question = (user.tip_count / total_answers) if total_answers > 0 else 0
-
-            message += f"{medal} {user.user_name}\n"
-            message += f"   💡 提示: {user.tip_count} | ✅ 正确: {user.correct_count} | ❌ 错误: {user.wrong_count}\n"
-            message += f"   📊 提示频率: {tips_per_question:.2f}/题 | 📅 最后更新: {user.updated_at.strftime('%Y-%m-%d')}\n\n"
-
-        return message
-
-    # 生成用户个人信息文本
-    def _generate_user_profile_text(self, user_stats, rank_info, honors=None, user_id: str | None = None):
-        """生成用户个人信息文本"""
-        honors = list(honors or [])
-
-        # 构建个人信息消息
-        title = user_stats.user_name if user_stats else (user_id or "未知用户")
-        message = f"👤 **用户信息 - {title}**\n\n"
-
-        if not user_stats:
-            message += "📊 **基础统计**\n"
-            message += "暂无答题记录\n"
-        else:
-            # 基础统计
-            total_answers = user_stats.correct_count + user_stats.wrong_count
-            accuracy = (user_stats.correct_count / total_answers * 100) if total_answers > 0 else 0
-
-            message += f"📊 **基础统计**\n"
-            message += f"✅ 正确: {user_stats.correct_count}\n"
-            message += f"❌ 错误: {user_stats.wrong_count}\n"
-            message += f"💡 提示: {user_stats.tip_count}\n"
-            message += f"🎯 准确率: {accuracy:.1f}%\n"
-            message += f"📝 总答题数: {total_answers}\n\n"
-
-            # 排名信息
-            if rank_info:
-                message += f"🏆 **排名信息** (共{rank_info.get('total_users', '?')}人)\n"
-                message += f"✅ 正确排名: 第{rank_info.get('correct_rank', '?')}名\n"
-                message += f"❌ 错误排名: 第{rank_info.get('wrong_rank', '?')}名\n"
-                message += f"💡 提示排名: 第{rank_info.get('tip_rank', '?')}名\n\n"
-
-            # 时间信息
-            message += f"📅 **时间信息**\n"
-            message += f"⏰ 注册时间: {user_stats.created_at.strftime('%Y-%m-%d %H:%M')}\n"
-            message += f"🔄 最后更新: {user_stats.updated_at.strftime('%Y-%m-%d %H:%M')}\n"
-
-        # 荣誉记录
-        if honors:
-            message += f"\n🏅 **比赛荣誉**\n"
-            for h in honors[:5]:
-                try:
-                    score_str = f"{float(getattr(h, 'score', 0.0)):.1f}"
-                except Exception:
-                    score_str = "-"
-                message += (
-                    f"{getattr(h, 'medal', '')} {getattr(h, 'match_name', '-')}: "
-                    f"第{getattr(h, 'rank', '?')}名（✅{getattr(h, 'correct_count', 0)}/"
-                    f"❌{getattr(h, 'wrong_count', 0)}，S{score_str}）\n"
-                )
-        else:
-            message += "\n暂无荣誉记录\n"
-
-        return message
-
-    # 统一的图片生成和回退处理
-    async def _generate_image_or_fallback(self, event, generate_image_func, generate_text_func, *args, **kwargs):
-        """统一的图片生成和回退处理"""
-        try:
-            # 尝试生成图片
-            image_path = await generate_image_func(*args, **kwargs)
-
-            # 检查图片是否存在
-            if os.path.exists(image_path):
-                yield event.chain_result([Comp.Image.fromFileSystem(image_path)])
-                return
-
-            # 图片不存在，使用文本模式
-            text_message = generate_text_func(*args, **kwargs)
-            yield event.plain_result(f"图片生成失败，使用文本模式显示\n\n{text_message}")
-
-        except Exception as render_error:
-            # 生成图片出错，使用文本模式
-            text_message = generate_text_func(*args, **kwargs)
-            yield event.plain_result(f"图片生成失败，使用文本模式显示\n错误: {str(render_error)}\n\n{text_message}")
-
     # 发送原始图片
     async def send_original_image(self, user_id: str, event: AstrMessageEvent):
         if user_id in self.original_images:
@@ -1075,49 +900,14 @@ class Mrfzccl(Star):
         self.player.pop(user_id, None)
         self.original_images.pop(user_id, None)
 
-    # 检查用户是否有活跃游戏
-    def has_active_game(self, user_id: str) -> bool:
-        data = self.player.get(user_id)
-        return bool(data and data.get("status") == "active")
-
     # 加载别名映射
     def _load_aliases(self):
         alias_str = self.Config.get("character_aliases", "钛铱:白金,宫羽:澄闪,小刻:刻俄柏,小羊:艾雅法拉")
-        for pair in alias_str.split(","):
-            if ":" in pair:
-                alias, name = pair.split(":", 1)
-                self.alias_map[alias.strip()] = name.strip()
-
-    # 解析别名
-    def resolve_alias(self, name: str) -> str:
-        return self.alias_map.get(name, name)
-
-    # 获取汉字的拼音（不带声调）
-    def get_pinyin(self, text: str) -> str:
-        return ''.join(lazy_pinyin(text, style=Style.NORMAL))
-
-    # 检查两个字符串是否同音（基于拼音）
-    def check_homophone(self, correct: str, guess: str) -> bool:
-        if not self.enable_homophone:
-            return False
-        correct_pinyin = self.get_pinyin(correct)
-        guess_pinyin = self.get_pinyin(guess)
-        return correct_pinyin == guess_pinyin
-
-    # 检查每日限制
-    def check_daily_limit(self, user_id: str) -> bool:
-        from datetime import datetime
-        today = datetime.now().date()
-        key = f"{user_id}_{today}"
-        count = self.daily_counter.get(key, 0)
-        if count >= self.daily_limit:
-            return False
-        self.daily_counter[key] = count + 1
-        return True
+        self.alias_map = parse_aliases(alias_str)
 
     # 初始化游戏，返回临时文件路径
     async def fc_init(self, user_id: str) -> bytes | str | None:
-        if self.has_active_game(user_id):
+        if has_active_game(self.player, user_id):
             return "already_exists"
         self.player[user_id] = {"status": "loading"}  # 设置加载状态
         try:
