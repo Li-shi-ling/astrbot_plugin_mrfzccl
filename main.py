@@ -150,6 +150,7 @@ class Mrfzccl(Star):
         # 如果是相对路径，将其转换为绝对路径
         if not os.path.isabs(data_path):
             # 获取插件所在目录
+            data_path = "arknights_skins_dict.json"
             plugin_dir = os.path.dirname(os.path.abspath(__file__))
             data_path = os.path.join(plugin_dir, data_path)
         if not data_path:
