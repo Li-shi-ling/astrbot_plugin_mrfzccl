@@ -65,6 +65,12 @@
     "default": 0,
     "hint": "超过指定时间自动结束"
   },
+  "match_hint_delay": {
+    "description": "比赛超时自动提示(秒,0表示关闭)",
+    "type": "int",
+    "default": 30,
+    "hint": "每题超过指定时间未答对，将自动发送 1 条提示"
+  },
   "admin_ids": {
     "description": "管理员QQ号列表",
     "type": "list",

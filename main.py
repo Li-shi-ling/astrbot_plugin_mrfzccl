@@ -1,4 +1,4 @@
-from astrbot.api.event import filter, AstrMessageEvent
+from astrbot.api.event import MessageChain, filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
 import astrbot.api.message_components as Comp
 from astrbot.api import AstrBotConfig, logger
@@ -23,6 +23,7 @@ from .src.db.repo import UserQnARepo, MatchRepo
 from .src.db.database import DBManager
 
 from typing import Optional, Dict, Any, Tuple, List
+from datetime import datetime, timedelta
 from difflib import SequenceMatcher
 from urllib.parse import urlparse
 from io import BytesIO
@@ -83,8 +84,11 @@ class Mrfzccl(Star):
         self.daily_counter: dict = {}  # 记录每日计数器
 
         # 比赛状态追踪
-        self.match_question_state: dict = {}  # 记录比赛题目状态
-        self.match_next_task: dict = {}  # 记录比赛下一个任务
+        self.match_question_state: dict[str, float] = {}  # group_id -> 当前题目开始时间戳
+        self.match_next_task: dict[str, asyncio.Task] = {}  # group_id -> 当前题目的自动提示任务
+        self.match_loop_task: dict[str, asyncio.Task] = {}  # group_id -> 比赛结束检测循环任务
+        self.match_sessions: dict[str, str] = {}  # group_id -> unified_msg_origin（用于主动消息）
+        self.match_locks: dict[str, asyncio.Lock] = {}  # group_id -> 锁，防止并发推进题目/结束比赛
 
         # 防重复配置
         self.recent_characters: list = []  # 最近出现的干员列表
@@ -101,6 +105,7 @@ class Mrfzccl(Star):
         # 比赛相关配置
         self.match_question_limit = self.Config.get("match_question_limit", 0)  # 比赛题目数量限制
         self.match_time_limit = self.Config.get("match_time_limit", 0)  # 比赛时间限制
+        self.match_hint_delay = self.Config.get("match_hint_delay", 0)  # 比赛超时自动提示（秒，0关闭）
         self.admin_ids = self.Config.get("admin_ids", [])  # 管理员ID列表
 
         # 设置默认配置
@@ -297,16 +302,13 @@ class Mrfzccl(Star):
 
         # 如果是比赛模式，更新比赛数据
         if is_group and match:
+            self.match_sessions[group_id] = event.unified_msg_origin
             await self.match_repo.add_participant(match.match_id, str(sender_id), sender_name)
             if is_correct:
                 await self.match_repo.increment_participant_score(match.match_id, str(sender_id))
-                self.match_question_state[group_id] = time.time()
-                # 取消下一个任务的计时器
-                if group_id in self.match_next_task and self.match_next_task[group_id]:
-                    try:
-                        self.match_next_task[group_id].cancel()
-                    except:
-                        pass
+                # 取消当前题目的自动提示任务
+                if group_id in self.match_next_task:
+                    self._safe_cancel_task(self.match_next_task.pop(group_id, None))
             else:
                 await self.match_repo.increment_participant_wrong(match.match_id, str(sender_id))
 
@@ -323,6 +325,43 @@ class Mrfzccl(Star):
                 user_id=sender_id,
                 user_name=sender_name
             )
+
+            # 比赛模式：自动出下一题 / 自动结束
+            if is_group and match:
+                lock = self._get_match_lock(group_id)
+                async with lock:
+                    # 结束条件检查（题目上限/时间上限）
+                    end_reason = await self._get_match_end_reason(match)
+                    if end_reason:
+                        if end_reason == "time_limit":
+                            yield event.plain_result(f"⏱️ 已达到时间限制，比赛「{match.match_name}」自动结束！")
+                        else:
+                            yield event.plain_result(f"📝 已达到题目上限，比赛「{match.match_name}」自动结束！")
+
+                        match_name, _, top_participants = await self._end_match_and_collect_top(group_id, match)
+                        async for result in generate_image_or_fallback(
+                            event=event,
+                            generate_image_func=lambda: self.renderer.generate_match_leaderboard_image(
+                                match_name,
+                                top_participants,
+                                title=f"比赛「{match_name}」已结束排行榜",
+                            ),
+                            generate_text_func=lambda: generate_match_leaderboard_text(match_name, top_participants, ended=True),
+                        ):
+                            yield result
+                        return
+
+                    # 自动发送下一题
+                    next_bytes = await self.fc_init(group_id)
+                    if next_bytes and next_bytes != "already_exists":
+                        yield event.chain_result([
+                            Comp.Plain("下一题来啦！\n干员立绘,请使用/fcc [干员名称] 进行猜测"),
+                            Comp.Image.fromBytes(next_bytes)
+                        ])
+                        self.match_question_state[group_id] = time.time()
+                        self._schedule_match_hint(group_id)
+                    else:
+                        yield event.plain_result("下一题获取失败，请管理员使用 /ccl 比赛开始 重试")
         else:
             chain = [
                 Comp.At(qq=sender_id),
@@ -384,32 +423,9 @@ class Mrfzccl(Star):
             yield event.plain_result("没有初始化房间,请使用/fc")
             return
 
-        # 判断提示类型（前4个是属性提示，后面是字数提示）
-        if self.player[user_id]["fctn"] <= 3:
-            key = self.fct_key[self.player[user_id]['fctn']]  # 获取提示键名
-            char_data = self.data.get(self.player[user_id]['name'], {})
+        hint_text = self._next_hint_text_and_advance(user_id)
+        yield event.plain_result(hint_text)
 
-            # 特殊处理职业分支信息
-            if key == "职业及分支":
-                value = char_data.get("职业及分支", char_data.get("职业分支", "该干员没有该属性"))
-            # 星级转换为中文
-            elif self.player[user_id]['fctn'] == 1:
-                star_map = {"1": "一星", "2": "二星", "3": "三星", "4": "四星", "5": "五星", "6": "六星"}
-                value = star_map.get(str(char_data.get("星级", "")), char_data.get("星级", ""))
-            # 特殊处理阵营信息
-            elif key == "阵营":
-                value = char_data.get("阵营", char_data.get("所属阵营", "该干员没有该属性"))
-            else:
-                value = char_data.get(key, "该干员没有该属性")
-
-            yield event.plain_result(f"这个干员的{key}为:{value}")
-        else:
-            # 字数提示：显示前N个字
-            name_len = self.player[user_id]["fctn"] - 2
-            yield event.plain_result(f"这个干员的前{name_len}个字为:{self.player[user_id]['name'][:name_len]}")
-
-        # 增加提示计数
-        self.player[user_id]["fctn"] += 1
         # 更新用户提示使用次数
         await self.user_qna_repo.increment_tip_count(
             user_id=event.get_sender_id(),
@@ -667,6 +683,7 @@ class Mrfzccl(Star):
             return
         user_id = str(event.get_sender_id())
         group_id = str(group_id_raw)
+        self.match_sessions[group_id] = event.unified_msg_origin
 
         # 检查管理员权限
         if self.admin_ids and user_id not in [str(x) for x in self.admin_ids]:
@@ -682,8 +699,23 @@ class Mrfzccl(Star):
         # 开始比赛
         await self.match_repo.start_match(match.match_id)
 
-        # 初始化第一题
-        result = await self.fc_init(group_id)
+        lock = self._get_match_lock(group_id)
+        async with lock:
+            # 防止上次比赛残留题目导致 fc_init 返回 already_exists
+            self.end_game(group_id)
+            # 取消旧的比赛循环/提示任务（防止重复启动）
+            if group_id in self.match_next_task:
+                self._safe_cancel_task(self.match_next_task.pop(group_id, None))
+            if group_id in self.match_loop_task:
+                self._safe_cancel_task(self.match_loop_task.pop(group_id, None))
+            self.match_question_state.pop(group_id, None)
+
+            # 初始化第一题
+            result = await self.fc_init(group_id)
+            if result and result != "already_exists":
+                self.match_question_state[group_id] = time.time()
+                self._schedule_match_hint(group_id)
+
         if result and result != "already_exists":
             yield event.chain_result([
                 Comp.Plain("🏁 比赛已开始！答题即为参与比赛\n干员立绘,请使用/fcc [干员名称] 进行猜测"),
@@ -693,7 +725,7 @@ class Mrfzccl(Star):
             yield event.plain_result("🏁 比赛已开始！第一题获取失败，请重试")
 
         # 创建比赛循环任务，用于检查结束条件
-        asyncio.create_task(self._match_game_loop(group_id, event))
+        self.match_loop_task[group_id] = asyncio.create_task(self._match_game_loop(group_id))
 
     # 结束比赛命令
     @ccl.command("比赛结束")
@@ -717,33 +749,9 @@ class Mrfzccl(Star):
             yield event.plain_result("❌ 当前没有进行中的比赛")
             return
 
-        match_name = match.match_name
-        match_id = match.match_id
-
-        # 结束比赛
-        await self.match_repo.end_match(match_id)
-
-        # 清理比赛状态
-        if group_id in self.match_question_state:
-            del self.match_question_state[group_id]
-        if group_id in self.match_next_task:
-            if self.match_next_task[group_id]:
-                try:
-                    self.match_next_task[group_id].cancel()
-                except:
-                    pass
-            del self.match_next_task[group_id]
-
-        # 清理玩家数据
-        players_to_remove = [uid for uid, p in self.player.items() if str(p.get("group_id", "")) == group_id]
-        for uid in players_to_remove:
-            del self.player[uid]
-
-        # 获取参赛者列表并排序
-        participants = await self.match_repo.get_participants(match_id)
-        participants.sort(key=lambda p: p.score, reverse=True)
-
-        top_participants = participants[:10]
+        lock = self._get_match_lock(group_id)
+        async with lock:
+            match_name, match_id, top_participants = await self._end_match_and_collect_top(group_id, match)
 
         # 使用统一的图片/文本生成函数（与排行榜等指令一致）
         async for result in generate_image_or_fallback(
@@ -756,13 +764,6 @@ class Mrfzccl(Star):
             generate_text_func=lambda: generate_match_leaderboard_text(match_name, top_participants, ended=True),
         ):
             yield result
-
-        # 保存荣誉记录
-        for i, p in enumerate(top_participants, 1):
-            await self.match_repo.save_honor(
-                p.user_id, match.match_id, match_name, i,
-                p.correct_count, p.wrong_count, p.score
-            )
 
     # 比赛排行榜命令
     @ccl.command("比赛排行")
@@ -938,6 +939,187 @@ class Mrfzccl(Star):
         self.player.pop(user_id, None)
         self.original_images.pop(user_id, None)
 
+    def _get_match_lock(self, group_id: str) -> asyncio.Lock:
+        lock = self.match_locks.get(group_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self.match_locks[group_id] = lock
+        return lock
+
+    @staticmethod
+    def _safe_cancel_task(task: asyncio.Task | None) -> None:
+        if not task:
+            return
+        try:
+            if not task.done():
+                task.cancel()
+        except Exception:
+            pass
+
+    def _clear_match_runtime(self, group_id: str) -> None:
+        self.match_question_state.pop(group_id, None)
+
+        hint_task = self.match_next_task.pop(group_id, None)
+        self._safe_cancel_task(hint_task)
+
+        loop_task = self.match_loop_task.pop(group_id, None)
+        try:
+            curr_task = asyncio.current_task()
+        except Exception:
+            curr_task = None
+        if loop_task is not curr_task:
+            self._safe_cancel_task(loop_task)
+
+        self.match_sessions.pop(group_id, None)
+
+        # 清理当前群的题目状态（防止比赛结束后仍可继续答题）
+        self.end_game(group_id)
+
+    async def _get_match_end_reason(self, match) -> str | None:
+        """返回比赛结束原因（time_limit/question_limit），不满足则返回 None。"""
+        if not match:
+            return None
+
+        # 时间限制（分钟）
+        try:
+            time_limit_min = int(getattr(match, "time_limit", 0) or 0)
+        except Exception:
+            time_limit_min = 0
+
+        if time_limit_min > 0:
+            started_at = getattr(match, "started_at", None)
+            if started_at:
+                try:
+                    if datetime.now() - started_at >= timedelta(minutes=time_limit_min):
+                        return "time_limit"
+                except Exception:
+                    pass
+
+        # 题目数量限制：按“正确题数（每题首次答对）”计
+        try:
+            q_limit = int(getattr(match, "question_limit", 0) or 0)
+        except Exception:
+            q_limit = 0
+
+        if q_limit > 0:
+            participants = await self.match_repo.get_participants(match.match_id)
+            try:
+                solved = sum(int(getattr(p, "correct_count", 0) or 0) for p in participants)
+            except Exception:
+                solved = 0
+            if solved >= q_limit:
+                return "question_limit"
+
+        return None
+
+    async def _end_match_and_collect_top(self, group_id: str, match) -> tuple[str, int, list]:
+        """结束比赛 + 清理运行态 + 返回 Top10 参赛者（已按得分排序），并保存荣誉。"""
+        match_name = getattr(match, "match_name", "比赛")
+        match_id = int(getattr(match, "match_id", 0) or 0)
+
+        await self.match_repo.end_match(match_id)
+        self._clear_match_runtime(group_id)
+
+        participants = await self.match_repo.get_participants(match_id)
+        participants.sort(key=lambda p: p.score, reverse=True)
+        top_participants = participants[:10]
+
+        for i, p in enumerate(top_participants, 1):
+            await self.match_repo.save_honor(
+                p.user_id, match_id, match_name, i,
+                p.correct_count, p.wrong_count, p.score
+            )
+
+        return match_name, match_id, top_participants
+
+    def _next_hint_text_and_advance(self, user_id: str) -> str:
+        """生成下一条提示，并将 fctn +1（不含任何权限/活跃检查）。"""
+        fctn = int(self.player.get(user_id, {}).get("fctn", 0) or 0)
+        name = str(self.player.get(user_id, {}).get("name", "") or "")
+
+        if fctn <= 3:
+            key = self.fct_key.get(fctn, "")
+            char_data = self.data.get(name, {}) if name else {}
+
+            if key == "职业及分支":
+                value = char_data.get("职业及分支", char_data.get("职业分支", "该干员没有该属性"))
+            elif fctn == 1:
+                star_map = {"1": "一星", "2": "二星", "3": "三星", "4": "四星", "5": "五星", "6": "六星"}
+                value = star_map.get(str(char_data.get("星级", "")), char_data.get("星级", ""))
+            elif key == "阵营":
+                value = char_data.get("阵营", char_data.get("所属阵营", "该干员没有该属性"))
+            else:
+                value = char_data.get(key, "该干员没有该属性")
+
+            text = f"这个干员的{key}为:{value}"
+        else:
+            # 名称提示：每次出现增加 1/3（向上取整）
+            if not name:
+                text = "无法获取干员名称"
+            else:
+                chunk = max(1, (len(name) + 2) // 3)  # ceil(len/3)
+                step = max(1, fctn - 3)  # 1,2,3...
+                reveal_len = min(len(name), chunk * step)
+                text = f"这个干员的前{reveal_len}个字为:{name[:reveal_len]}"
+
+        # 递增提示计数
+        if user_id in self.player:
+            self.player[user_id]["fctn"] = fctn + 1
+
+        return text
+
+    def _schedule_match_hint(self, group_id: str) -> None:
+        """为当前题目安排一次“超时自动提示”。delay<=0 时不启用。"""
+        try:
+            delay = int(self.match_hint_delay or 0)
+        except Exception:
+            delay = 0
+        if delay <= 0:
+            return
+
+        session = self.match_sessions.get(group_id)
+        if not session:
+            return
+
+        # 取消旧任务
+        if group_id in self.match_next_task:
+            self._safe_cancel_task(self.match_next_task.pop(group_id, None))
+
+        self.match_next_task[group_id] = asyncio.create_task(
+            self._match_hint_after_delay(group_id, session, delay)
+        )
+
+    async def _match_hint_after_delay(self, group_id: str, session: str, delay: int) -> None:
+        try:
+            await asyncio.sleep(max(1, int(delay)))
+
+            if self._shutting_down:
+                return
+
+            match = await self.match_repo.get_active_match(group_id)
+            if not match or not match.is_active:
+                return
+
+            if not has_active_game(self.player, group_id):
+                return
+
+            lock = self._get_match_lock(group_id)
+            async with lock:
+                # 二次确认：避免刚好答对/结束后仍发送提示
+                match2 = await self.match_repo.get_active_match(group_id)
+                if not match2 or not match2.is_active:
+                    return
+                if not has_active_game(self.player, group_id):
+                    return
+                hint_text = self._next_hint_text_and_advance(group_id)
+
+            await self.context.send_message(session, MessageChain().message(f"💡 超时提示：{hint_text}"))
+
+        except asyncio.CancelledError:
+            return
+        except Exception as e:
+            logger.warning(f"[match] 自动提示任务异常 group_id={group_id}: {e}")
+
     # 加载别名映射
     def _load_aliases(self):
         alias_str = self.Config.get("character_aliases", "钛铱:白金,宫羽:澄闪,小刻:刻俄柏,小羊:艾雅法拉")
@@ -945,7 +1127,8 @@ class Mrfzccl(Star):
 
     # 初始化游戏，返回临时文件路径
     async def fc_init(self, user_id: str) -> bytes | str | None:
-        if has_active_game(self.player, user_id):
+        existing = self.player.get(user_id)
+        if existing and existing.get("status") in {"active", "loading"}:
             return "already_exists"
         self.player[user_id] = {"status": "loading"}  # 设置加载状态
         try:
@@ -1361,38 +1544,82 @@ class Mrfzccl(Star):
         image.save(buf, format=format, optimize=True)  # optimize优化图片大小
         return buf.getvalue()
 
+    async def _send_match_leaderboard_to_session(
+        self,
+        session: str,
+        match_name: str,
+        top_participants: list,
+        title: str,
+    ) -> None:
+        """主动消息发送比赛排行榜（优先图片，失败回退文本）。"""
+        if self._shutting_down:
+            return
+        try:
+            image_path = await self.renderer.generate_match_leaderboard_image(
+                match_name,
+                top_participants,
+                title=title,
+            )
+            if image_path and os.path.exists(image_path):
+                try:
+                    await self.context.send_message(session, MessageChain().file_image(image_path))
+                    return
+                except Exception as e:
+                    logger.warning(f"[match] 主动发送排行榜图片失败，回退文本: {e}")
+        except Exception as e:
+            logger.warning(f"[match] 比赛排行榜图片发送失败，回退文本: {e}")
+
+        text = generate_match_leaderboard_text(match_name, top_participants, ended=True)
+        try:
+            await self.context.send_message(session, MessageChain().message(text))
+        except Exception as e:
+            logger.warning(f"[match] 主动发送排行榜文本失败: {e}")
+
     # 比赛游戏循环 - 用于检查结束条件
-    async def _match_game_loop(self, group_id: str, event: AstrMessageEvent):
+    async def _match_game_loop(self, group_id: str):
         await asyncio.sleep(2)
 
-        start_time = time.time()
-        last_check = start_time
-        max_questions = self.match_question_limit if self.match_question_limit > 0 else 999999
-        time_limit_seconds = self.match_time_limit * 60 if self.match_time_limit > 0 else 999999999
-
-        # 循环检查比赛结束条件
-        while True:
+        while not self._shutting_down:
             await asyncio.sleep(5)
 
-            # 获取比赛状态
             match = await self.match_repo.get_active_match(group_id)
             if not match or not match.is_active:
-                break
+                return
 
-            # 检查时间限制
-            if time.time() - start_time > time_limit_seconds:
-                await self.match_repo.end_match(match.match_id)
-                break
+            end_reason = await self._get_match_end_reason(match)
+            if not end_reason:
+                continue
 
-            # 检查题目数量限制
-            if match.question_limit > 0:
-                participants = await self.match_repo.get_participants(match.match_id)
-                total_answers = sum(p.correct_count + p.wrong_count for p in participants)
-                if total_answers >= match.question_limit:
-                    await self.match_repo.end_match(match.match_id)
-                    break
+            lock = self._get_match_lock(group_id)
+            async with lock:
+                # 二次确认，避免与管理员/答题正确的自动结束并发导致重复结算
+                match2 = await self.match_repo.get_active_match(group_id)
+                if not match2 or not match2.is_active:
+                    return
 
-            await asyncio.sleep(1)
+                session = self.match_sessions.get(group_id)
+                if end_reason == "time_limit":
+                    reason_text = f"⏱️ 已达到时间限制，比赛「{match2.match_name}」自动结束！"
+                else:
+                    reason_text = f"📝 已达到题目上限，比赛「{match2.match_name}」自动结束！"
+
+                match_name, _, top_participants = await self._end_match_and_collect_top(group_id, match2)
+
+                if not session:
+                    logger.warning(f"[match] 缺少 session，无法主动发送比赛结束消息 group_id={group_id}")
+                    return
+
+                try:
+                    await self.context.send_message(session, MessageChain().message(reason_text))
+                    await self._send_match_leaderboard_to_session(
+                        session=session,
+                        match_name=match_name,
+                        top_participants=top_participants,
+                        title=f"比赛「{match_name}」已结束排行榜",
+                    )
+                except Exception as e:
+                    logger.warning(f"[match] 主动发送比赛结束消息失败 group_id={group_id}: {e}")
+                return
 
     # 插件初始化时
     async def initialize(self):
@@ -1403,6 +1630,16 @@ class Mrfzccl(Star):
     # 插件卸载时的清理钩子
     async def terminate(self):
         self._shutting_down = True
+        # 取消比赛相关任务（防止卸载后仍在后台发送消息）
+        for task in list(self.match_next_task.values()):
+            self._safe_cancel_task(task)
+        for task in list(self.match_loop_task.values()):
+            self._safe_cancel_task(task)
+        self.match_next_task.clear()
+        self.match_loop_task.clear()
+        self.match_sessions.clear()
+        self.match_question_state.clear()
+
         if self._session and not self._session.closed:
             await self._session.close()
             logger.debug("[Mrfzccl] HTTP会话已关闭")
