@@ -342,7 +342,8 @@ class Mrfzccl(Star):
                         return
 
                     # 若已经有人推进到下一题，当前协程无需重复出题
-                    if has_active_game(self.player, group_id):
+                    existing = self.player.get(group_id)
+                    if existing and existing.get("status") in {"active", "loading"}:
                         return
 
                     end_reason = await self._get_match_end_reason(match_now)
@@ -771,13 +772,18 @@ class Mrfzccl(Star):
         lock = self._get_match_lock(group_id)
         match_name = ""
         top_participants = []
+        no_match = False
         async with lock:
             # 重新获取活跃比赛，避免与自动结束并发导致重复荣誉
             match_now = await self.match_repo.get_active_match(group_id)
             if not match_now or not match_now.is_active:
-                yield event.plain_result("❌ 当前没有进行中的比赛")
-                return
-            match_name, _, top_participants = await self._end_match_and_collect_top(group_id, match_now)
+                no_match = True
+            else:
+                match_name, _, top_participants = await self._end_match_and_collect_top(group_id, match_now)
+
+        if no_match:
+            yield event.plain_result("❌ 当前没有进行中的比赛")
+            return
 
         # 使用统一的图片/文本生成函数（与排行榜等指令一致）
         async for result in generate_image_or_fallback(
@@ -1639,6 +1645,10 @@ class Mrfzccl(Star):
                 continue
 
             lock = self._get_match_lock(group_id)
+            session = None
+            reason_text = ""
+            match_name = ""
+            top_participants = []
             async with lock:
                 # 二次确认，避免与管理员/答题正确的自动结束并发导致重复结算
                 match2 = await self.match_repo.get_active_match(group_id)
@@ -1657,17 +1667,17 @@ class Mrfzccl(Star):
                     logger.warning(f"[match] 缺少 session，无法主动发送比赛结束消息 group_id={group_id}")
                     return
 
-                try:
-                    await self.context.send_message(session, MessageChain().message(reason_text))
-                    await self._send_match_leaderboard_to_session(
-                        session=session,
-                        match_name=match_name,
-                        top_participants=top_participants,
-                        title=f"比赛「{match_name}」已结束排行榜",
-                    )
-                except Exception as e:
-                    logger.warning(f"[match] 主动发送比赛结束消息失败 group_id={group_id}: {e}")
-                return
+            try:
+                await self.context.send_message(session, MessageChain().message(reason_text))
+                await self._send_match_leaderboard_to_session(
+                    session=session,
+                    match_name=match_name,
+                    top_participants=top_participants,
+                    title=f"比赛「{match_name}」已结束排行榜",
+                )
+            except Exception as e:
+                logger.warning(f"[match] 主动发送比赛结束消息失败 group_id={group_id}: {e}")
+            return
 
     # 插件初始化时
     async def initialize(self):
