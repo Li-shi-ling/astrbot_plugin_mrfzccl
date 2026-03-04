@@ -329,39 +329,60 @@ class Mrfzccl(Star):
             # 比赛模式：自动出下一题 / 自动结束
             if is_group and match:
                 lock = self._get_match_lock(group_id)
-                async with lock:
-                    # 结束条件检查（题目上限/时间上限）
-                    end_reason = await self._get_match_end_reason(match)
-                    if end_reason:
-                        if end_reason == "time_limit":
-                            yield event.plain_result(f"⏱️ 已达到时间限制，比赛「{match.match_name}」自动结束！")
-                        else:
-                            yield event.plain_result(f"📝 已达到题目上限，比赛「{match.match_name}」自动结束！")
+                end_reason = None
+                ended_match_name = ""
+                ended_top_participants = []
+                next_bytes = None
+                next_failed = False
 
-                        match_name, _, top_participants = await self._end_match_and_collect_top(group_id, match)
-                        async for result in generate_image_or_fallback(
-                            event=event,
-                            generate_image_func=lambda: self.renderer.generate_match_leaderboard_image(
-                                match_name,
-                                top_participants,
-                                title=f"比赛「{match_name}」已结束排行榜",
-                            ),
-                            generate_text_func=lambda: generate_match_leaderboard_text(match_name, top_participants, ended=True),
-                        ):
-                            yield result
+                async with lock:
+                    # 重新获取活跃比赛，避免已自动结束后再次结算导致重复荣誉
+                    match_now = await self.match_repo.get_active_match(group_id)
+                    if not match_now or not match_now.is_active:
                         return
 
-                    # 自动发送下一题
-                    next_bytes = await self.fc_init(group_id)
-                    if next_bytes and next_bytes != "already_exists":
-                        yield event.chain_result([
-                            Comp.Plain("下一题来啦！\n干员立绘,请使用/fcc [干员名称] 进行猜测"),
-                            Comp.Image.fromBytes(next_bytes)
-                        ])
-                        self.match_question_state[group_id] = time.time()
-                        self._schedule_match_hint(group_id)
+                    # 若已经有人推进到下一题，当前协程无需重复出题
+                    if has_active_game(self.player, group_id):
+                        return
+
+                    end_reason = await self._get_match_end_reason(match_now)
+                    if end_reason:
+                        ended_match_name, _, ended_top_participants = await self._end_match_and_collect_top(group_id, match_now)
                     else:
-                        yield event.plain_result("下一题获取失败，请管理员使用 /ccl 比赛开始 重试")
+                        next_bytes = await self.fc_init(group_id)
+                        if next_bytes and next_bytes != "already_exists":
+                            self.match_question_state[group_id] = time.time()
+                            self._schedule_match_hint(group_id)
+                        else:
+                            next_failed = True
+
+                if end_reason:
+                    if end_reason == "time_limit":
+                        yield event.plain_result(f"⏱️ 已达到时间限制，比赛「{ended_match_name}」自动结束！")
+                    else:
+                        yield event.plain_result(f"📝 已达到题目上限，比赛「{ended_match_name}」自动结束！")
+
+                    async for result in generate_image_or_fallback(
+                        event=event,
+                        generate_image_func=lambda: self.renderer.generate_match_leaderboard_image(
+                            ended_match_name,
+                            ended_top_participants,
+                            title=f"比赛「{ended_match_name}」已结束排行榜",
+                        ),
+                        generate_text_func=lambda: generate_match_leaderboard_text(ended_match_name, ended_top_participants, ended=True),
+                    ):
+                        yield result
+                    return
+
+                if next_failed:
+                    yield event.plain_result("下一题获取失败，请管理员使用 /ccl 比赛开始 重试")
+                    return
+
+                if next_bytes and next_bytes != "already_exists":
+                    yield event.chain_result([
+                        Comp.Plain("下一题来啦！\n干员立绘,请使用/fcc [干员名称] 进行猜测"),
+                        Comp.Image.fromBytes(next_bytes)
+                    ])
         else:
             chain = [
                 Comp.At(qq=sender_id),
@@ -743,15 +764,16 @@ class Mrfzccl(Star):
             yield event.plain_result("❌ 只有管理员可以结束比赛")
             return
 
-        # 获取活跃比赛
-        match = await self.match_repo.get_active_match(group_id)
-        if not match:
-            yield event.plain_result("❌ 当前没有进行中的比赛")
-            return
-
         lock = self._get_match_lock(group_id)
+        match_name = ""
+        top_participants = []
         async with lock:
-            match_name, match_id, top_participants = await self._end_match_and_collect_top(group_id, match)
+            # 重新获取活跃比赛，避免与自动结束并发导致重复荣誉
+            match_now = await self.match_repo.get_active_match(group_id)
+            if not match_now or not match_now.is_active:
+                yield event.plain_result("❌ 当前没有进行中的比赛")
+                return
+            match_name, _, top_participants = await self._end_match_and_collect_top(group_id, match_now)
 
         # 使用统一的图片/文本生成函数（与排行榜等指令一致）
         async for result in generate_image_or_fallback(

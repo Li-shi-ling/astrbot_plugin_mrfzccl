@@ -1034,6 +1034,33 @@ class MatchRepo:
         medals = {1: "🥇", 2: "🥈", 3: "🥉"}
         medal = medals.get(rank, f"{rank}名")
         async with self.db.get_session() as session:
+            # match_id=0 为“虚拟比赛ID”（手动授予荣誉），不适用按 match_id 去重
+            if match_id != 0:
+                existing_stmt = select(MatchHonor).where(
+                    and_(MatchHonor.user_id == user_id, MatchHonor.match_id == match_id)
+                )
+                result = await session.execute(existing_stmt)
+                existing_list = list(result.scalars().all())
+
+                if existing_list:
+                    keep = existing_list[0]
+                    keep.match_name = match_name
+                    keep.rank = rank
+                    keep.correct_count = correct_count
+                    keep.wrong_count = wrong_count
+                    keep.score = score
+                    keep.medal = medal
+
+                    # 兼容历史重复数据：清理多余的重复荣誉记录
+                    for extra in existing_list[1:]:
+                        try:
+                            session.delete(extra)
+                        except Exception:
+                            pass
+
+                    await session.commit()
+                    return
+
             honor = MatchHonor(
                 user_id=user_id, match_id=match_id, match_name=match_name,
                 rank=rank, correct_count=correct_count, wrong_count=wrong_count,
@@ -1056,7 +1083,32 @@ class MatchRepo:
         async with self.db.get_session() as session:
             stmt = select(MatchHonor).where(MatchHonor.user_id == user_id).order_by(desc(MatchHonor.rank))
             result = await session.execute(stmt)
-            return list(result.scalars().all())
+            honors = list(result.scalars().all())
+
+            # 兼容历史数据：同一场比赛可能被重复写入荣誉，名片展示时去重
+            deduped: list[MatchHonor] = []
+            seen_match_ids: set[int] = set()
+            seen_virtual: set[tuple] = set()
+            for h in honors:
+                mid = getattr(h, "match_id", 0) or 0
+                if mid != 0:
+                    if int(mid) in seen_match_ids:
+                        continue
+                    seen_match_ids.add(int(mid))
+                else:
+                    key = (
+                        str(getattr(h, "match_name", "") or ""),
+                        int(getattr(h, "rank", 0) or 0),
+                        int(getattr(h, "correct_count", 0) or 0),
+                        int(getattr(h, "wrong_count", 0) or 0),
+                        float(getattr(h, "score", 0.0) or 0.0),
+                    )
+                    if key in seen_virtual:
+                        continue
+                    seen_virtual.add(key)
+                deduped.append(h)
+
+            return deduped
 
     # 重置用户荣誉
     async def reset_user_honors(self, user_id: str):
