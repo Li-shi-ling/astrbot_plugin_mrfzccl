@@ -148,18 +148,22 @@ class Mrfzccl(Star):
 
         # 构建数据文件路径
         data_path = self.Config.get("mrfz_data_path", "arknights_skins_dict.json")
+        # 如果是相对路径，将其转换为绝对路径
+        if not os.path.isabs(data_path):
+            # 获取插件所在目录
+            plugin_dir = os.path.dirname(os.path.abspath(__file__))
+            data_path = os.path.join(plugin_dir, data_path)
         if not data_path:
             logger.error("[Mrfzccl] 未配置数据文件路径")
             return
         try:
             logger.info(f"[Mrfzccl] 数据文件路径: {data_path}")
-            asb_data_path = self._get_absolute_path(data_path)
-            if not os.path.exists(asb_data_path):
-                logger.error(f"[Mrfzccl] 数据文件不存在: {asb_data_path}")
+            if not os.path.exists(data_path):
+                logger.error(f"[Mrfzccl] 数据文件不存在: {data_path}")
                 return
             logger.info(f"[Mrfzccl] 数据文件存在，开始读取")
             # 读取并解析JSON数据文件
-            with open(asb_data_path, "r", encoding="utf-8") as f:
+            with open(data_path, "r", encoding="utf-8") as f:
                 self.data = json.load(f)
             logger.info(f"[Mrfzccl] JSON解析成功")
             if not isinstance(self.data, dict):
