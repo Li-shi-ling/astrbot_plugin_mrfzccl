@@ -153,12 +153,13 @@ class Mrfzccl(Star):
             return
         try:
             logger.info(f"[Mrfzccl] 数据文件路径: {data_path}")
-            if not os.path.exists(data_path):
-                logger.error(f"[Mrfzccl] 数据文件不存在: {data_path}")
+            asb_data_path = self._get_absolute_path(data_path)
+            if not os.path.exists(asb_data_path):
+                logger.error(f"[Mrfzccl] 数据文件不存在: {asb_data_path}")
                 return
             logger.info(f"[Mrfzccl] 数据文件存在，开始读取")
             # 读取并解析JSON数据文件
-            with open(data_path, "r", encoding="utf-8") as f:
+            with open(asb_data_path, "r", encoding="utf-8") as f:
                 self.data = json.load(f)
             logger.info(f"[Mrfzccl] JSON解析成功")
             if not isinstance(self.data, dict):
@@ -1145,10 +1146,6 @@ class Mrfzccl(Star):
     def _get_absolute_path(self, path: str) -> str:
         if not path:
             raise ValueError("路径不能为空")
-        # 如果是相对路径，相对于插件目录解析
-        if not os.path.isabs(path):
-            plugin_dir = os.path.dirname(os.path.abspath(__file__))
-            path = os.path.join(plugin_dir, path)
         return os.path.abspath(path)
 
     # 从URL异步获取图片
