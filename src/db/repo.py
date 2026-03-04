@@ -829,7 +829,7 @@ class MatchRepo:
             group_id: 群组ID
             match_name: 比赛名称
             question_limit: 题目数量限制（0表示无限制）
-            time_limit: 时间限制（秒，0表示无限制）
+            time_limit: 时间限制（分钟，0表示无限制）
 
         返回:
             创建的比赛对象
@@ -925,9 +925,15 @@ class MatchRepo:
             result = await session.execute(stmt)
             existing = result.scalar_one_or_none()
             if existing:
+                # 同步最新昵称，避免排行榜/名片长期显示旧昵称
+                if existing.user_name != user_name:
+                    existing.user_name = user_name
+                    await session.commit()
                 return existing
             participant = MatchParticipant(
-                match_id=match_id, user_id=user_id, user_name=user_name
+                match_id=match_id,
+                user_id=user_id,
+                user_name=user_name,
             )
             session.add(participant)
             await session.commit()
