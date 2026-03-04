@@ -60,19 +60,6 @@ def calculate_char_coverage_counter(correct_name: str, guess_text: str) -> float
 
     return coverage
 
-def isAdmin(func):
-    async def wrapper(self, event: AstrMessageEvent, *args, **kwargs):
-        if self.require_admin:
-            user_id = str(event.get_sender_id())
-            # 检查管理员权限
-            if self.admin_ids and user_id not in [str(x) for x in self.admin_ids]:
-                yield event.plain_result("❌ 只有管理员可以查看排行榜")
-                return
-        # 管理员权限，执行原函数
-        async for output in func(self, event, *args, **kwargs):
-            yield output
-    return wrapper
-
 def generate_correct_leaderboard_text(users: Iterable[Any], summary: Optional[Mapping[str, Any]] = None) -> str:
     """生成正确量排行榜文本"""
     users = list(users or [])

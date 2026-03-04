@@ -16,7 +16,6 @@ from .src.tool import (
     generate_user_profile_text,
     generate_wrong_leaderboard_text,
     has_active_game,
-    isAdmin,
     parse_aliases,
     resolve_alias,
 )
@@ -478,9 +477,14 @@ class Mrfzccl(Star):
     # ========== 排行榜相关函数 ==========
     # 获取正确个数的排行榜命令
     @ccl.command("排行榜")
-    @isAdmin
     async def correct_answers_leaderboard(self, event: AstrMessageEvent):
         """获取正确个数的排行榜 /ccl 排行榜"""
+        if self.require_admin:
+            user_id = str(event.get_sender_id())
+            # 检查管理员权限
+            if self.admin_ids and user_id not in [str(x) for x in self.admin_ids]:
+                yield event.plain_result("❌ 只有管理员可以查看排行榜")
+                return
         try:
             # 获取排行榜数据（前10名）
             users = await self.user_qna_repo.get_correct_answers_leaderboard(limit=10)
@@ -505,9 +509,14 @@ class Mrfzccl(Star):
 
     # 获取错误个数的排行榜命令
     @ccl.command("错误排行榜")
-    @isAdmin
     async def wrong_answers_leaderboard(self, event: AstrMessageEvent):
         """获取错误个数的排行榜 /ccl 错误排行榜"""
+        if self.require_admin:
+            user_id = str(event.get_sender_id())
+            # 检查管理员权限
+            if self.admin_ids and user_id not in [str(x) for x in self.admin_ids]:
+                yield event.plain_result("❌ 只有管理员可以查看排行榜")
+                return
         try:
             # 获取排行榜数据（前10名）
             users = await self.user_qna_repo.get_wrong_answers_leaderboard(limit=10)
@@ -529,9 +538,14 @@ class Mrfzccl(Star):
 
     # 获取使用提示次数的排行榜命令
     @ccl.command("提示排行榜")
-    @isAdmin
     async def hints_usage_leaderboard(self, event: AstrMessageEvent):
         """获取使用提示次数的排行榜 /ccl 提示排行榜"""
+        if self.require_admin:
+            user_id = str(event.get_sender_id())
+            # 检查管理员权限
+            if self.admin_ids and user_id not in [str(x) for x in self.admin_ids]:
+                yield event.plain_result("❌ 只有管理员可以查看排行榜")
+                return
         try:
             # 获取排行榜数据（前10名）
             users = await self.user_qna_repo.get_hints_usage_leaderboard(limit=10)
