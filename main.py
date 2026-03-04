@@ -99,17 +99,23 @@ class Mrfzccl(Star):
         self.low_weight_keywords = self.Config.get("low_weight_characters", "预备干员,机师,W,SideStory").split(",")
         self.low_weight_ratio = self.Config.get("low_weight_ratio", 0.2)  # 低权重干员出现概率
 
+        # 比赛相关配置
+        self.match_question_limit = self.Config.get("match_question_limit", 0)  # 比赛题目数量限制
+        self.match_time_limit = self.Config.get("match_time_limit", 0)  # 比赛时间限制
+        self.admin_ids = self.Config.get("admin_ids", [])  # 管理员ID列表
+
+        # 设置默认配置
+        self.target_size = self.Config.get("target_size", 128)  # 图片目标尺寸
+        self.easy_probability = self.Config.get("easy_probability", 0.6)  # 简单难度概率
+        self.medium_probability = self.Config.get("medium_probability", 0.3)  # 中等难度概率
+        self.hard_probability = self.Config.get("hard_probability", 0.1)  # 困难难度概率
+
         # 添加 HTTP 会话管理
         self._session: Optional[aiohttp.ClientSession] = None
         self._executor = None  # 线程池执行器
 
         # 获取存储目录配置
-        self.storage_dir = self.Config.get("storage_dir", "./plugin_data")
-        # 如果是相对路径，将其转换为绝对路径
-        if not os.path.isabs(self.storage_dir):
-            # 获取插件所在目录
-            plugin_dir = os.path.dirname(os.path.abspath(__file__))
-            self.storage_dir = os.path.join(plugin_dir, self.storage_dir)
+        self.storage_dir = str(StarTools.get_data_dir())
         logger.info(f"[Mrfzccl] 存储目录: {self.storage_dir}")
 
         # 确保存储目录存在
@@ -119,7 +125,8 @@ class Mrfzccl(Star):
         self.db_dir = os.path.join(self.storage_dir, "db")
         os.makedirs(self.db_dir, exist_ok=True)
         self.db_path = os.path.join(self.db_dir, "mrfzccl.db")
-        logger.debug(f"[Mrfzccl] 数据库使用 {self.db_path}")
+        logger.debug(f"[Mrfzccl] 数据库目录: {self.db_path}")
+
         # 初始化数据库管理器
         self.db = DBManager(
             db_path=self.db_path
@@ -127,29 +134,20 @@ class Mrfzccl(Star):
         # 初始化用户问答仓库
         self.user_qna_repo = UserQnARepo(self.db)
 
-        # 比赛配置（需在db初始化后）
+        # 初始化比赛仓库
         self.match_repo = MatchRepo(self.db)  # 比赛仓库
-        self.match_question_limit = self.Config.get("match_question_limit", 0)  # 比赛题目数量限制
-        self.match_time_limit = self.Config.get("match_time_limit", 0)  # 比赛时间限制
-        self.admin_ids = self.Config.get("admin_ids", [])  # 管理员ID列表
 
         # 构建临时图片路径
         self.img_tmp_path = os.path.join(self.storage_dir, "tmp")
         os.makedirs(self.img_tmp_path, exist_ok=True)
+
         # 初始化问答统计渲染器
         renderer_theme = self.Config.get("renderer_theme", "light")
         self.renderer = QnAStatsRenderer(output_dir=self.img_tmp_path, theme=renderer_theme)
         logger.info(f"[Mrfzccl] 渲染主题: {renderer_theme}")
 
-        # 设置默认配置
-        self.target_size = self.Config.get("target_size", 128)  # 图片目标尺寸
-        self.easy_probability = self.Config.get("easy_probability", 0.6)  # 简单难度概率
-        self.medium_probability = self.Config.get("medium_probability", 0.3)  # 中等难度概率
-        self.hard_probability = self.Config.get("hard_probability", 0.1)  # 困难难度概率
-
         # 构建数据文件路径
-        data_file_name = self.Config.get("mrfz_data_path", "arknights_skins_dict.json")
-        data_path = os.path.join(self.storage_dir, data_file_name)
+        data_path = self.Config.get("mrfz_data_path", "arknights_skins_dict.json")
         if not data_path:
             logger.error("[Mrfzccl] 未配置数据文件路径")
             return
