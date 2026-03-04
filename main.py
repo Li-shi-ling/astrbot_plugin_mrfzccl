@@ -121,9 +121,7 @@ class Mrfzccl(Star):
         os.makedirs(self.storage_dir, exist_ok=True)
 
         # 构建数据库路径
-        self.db_dir = os.path.join(self.storage_dir, "db")
-        os.makedirs(self.db_dir, exist_ok=True)
-        self.db_path = os.path.join(self.db_dir, "mrfzccl.db")
+        self.db_path = os.path.join(self.storage_dir, "mrfzccl.db")
         logger.debug(f"[Mrfzccl] 数据库目录: {self.db_path}")
 
         # 初始化数据库管理器
