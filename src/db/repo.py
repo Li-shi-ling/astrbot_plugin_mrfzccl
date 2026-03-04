@@ -1,13 +1,12 @@
 from datetime import datetime
 from typing import List, Optional, Tuple
-from sqlalchemy import desc, func, select, update, and_, or_
+from sqlalchemy import desc, func, select, update, and_, or_, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.engine import CursorResult
 
-from .tables import UserQnAStats
+from .tables import UserQnAStats, Match, MatchParticipant, MatchHonor
 from .database import DBManager
-
 
 class UserQnARepo:
     """用户问答统计仓库，封装所有的数据库交互逻辑"""
@@ -621,6 +620,39 @@ class UserQnARepo:
             result = await session.execute(stmt)
             return list(result.scalars().all())
 
+    # 重置用户答题数据
+    async def reset_user_stats(self, user_id: str):
+        """重置用户答题数据"""
+        async with self.db.get_session() as session:
+            stmt = (
+                update(UserQnAStats)
+                .where(UserQnAStats.user_id == user_id)
+                .values(
+                    correct_count=0,
+                    wrong_count=0,
+                    tip_count=0,
+                    updated_at=datetime.now()
+                )
+            )
+            await session.execute(stmt)
+            await session.commit()
+
+    # 重置所有用户的答题数据
+    async def reset_all_stats(self):
+        """重置所有用户的答题数据"""
+        async with self.db.get_session() as session:
+            stmt = (
+                update(UserQnAStats)
+                .values(
+                    correct_count=0,
+                    wrong_count=0,
+                    tip_count=0,
+                    updated_at=datetime.now()
+                )
+            )
+            await session.execute(stmt)
+            await session.commit()
+
     # 获取错误个数排行榜
     async def get_wrong_answers_leaderboard(self, limit: int = 10, offset: int = 0) -> List[UserQnAStats]:
         """
@@ -781,3 +813,328 @@ class UserQnARepo:
                 'avg_correct': avg_correct,
                 'total_questions': total_correct + total_wrong
             }
+
+class MatchRepo:
+    """比赛数据仓库"""
+
+    def __init__(self, db_manager: DBManager):
+        self.db = db_manager
+
+    # 创建新比赛
+    async def create_match(self, group_id: str, match_name: str, question_limit: int = 0, time_limit: int = 0) -> Match:
+        """
+        创建新比赛
+
+        参数:
+            group_id: 群组ID
+            match_name: 比赛名称
+            question_limit: 题目数量限制（0表示无限制）
+            time_limit: 时间限制（分钟，0表示无限制）
+
+        返回:
+            创建的比赛对象
+        """
+        async with self.db.get_session() as session:
+            match = Match(
+                group_id=group_id,
+                match_name=match_name,
+                is_active=True,
+                question_limit=question_limit,
+                time_limit=time_limit
+            )
+            session.add(match)
+            await session.commit()
+            return match
+
+    # 获取活跃比赛
+    async def get_active_match(self, group_id: str) -> Optional[Match]:
+        """
+        获取指定群组的活跃比赛
+
+        参数:
+            group_id: 群组ID
+
+        返回:
+            活跃的比赛对象，如果不存在则返回None
+        """
+        async with self.db.get_session() as session:
+            stmt = select(Match).where(
+                and_(Match.group_id == group_id, Match.is_active)
+            )
+            result = await session.execute(stmt)
+            return result.scalar_one_or_none()
+
+    # 开始比赛
+    async def start_match(self, match_id: int):
+        """
+        开始指定ID的比赛
+
+        参数:
+            match_id: 比赛ID
+        """
+        async with self.db.get_session() as session:
+            stmt = select(Match).where(
+                Match.match_id == match_id
+            )
+            result = await session.execute(stmt)
+            match = result.scalar_one_or_none()
+            if match:
+                match.is_active = True
+                match.started_at = datetime.now()
+                await session.commit()
+
+    # 结束比赛
+    async def end_match(self, match_id: int):
+        """
+        结束指定ID的比赛
+
+        参数:
+            match_id: 比赛ID
+        """
+        async with self.db.get_session() as session:
+            stmt = select(Match).where(
+                Match.match_id == match_id
+            )
+            result = await session.execute(stmt)
+            match = result.scalar_one_or_none()
+            if match:
+                match.is_active = False
+                match.ended_at = datetime.now()
+                await session.commit()
+
+    # 添加参赛者
+    async def add_participant(self, match_id: int, user_id: str, user_name: str) -> MatchParticipant:
+        """
+        向比赛添加参赛者
+
+        参数:
+            match_id: 比赛ID
+            user_id: 用户ID
+            user_name: 用户名称
+
+        返回:
+            参赛者对象（如果已存在则返回现有对象）
+        """
+        async with self.db.get_session() as session:
+            stmt = select(MatchParticipant).where(
+                and_(
+                    MatchParticipant.match_id == match_id,
+                    MatchParticipant.user_id == user_id
+                )
+            )
+            result = await session.execute(stmt)
+            existing = result.scalar_one_or_none()
+            if existing:
+                # 同步最新昵称，避免排行榜/名片长期显示旧昵称
+                if existing.user_name != user_name:
+                    existing.user_name = user_name
+                    await session.commit()
+                return existing
+            participant = MatchParticipant(
+                match_id=match_id,
+                user_id=user_id,
+                user_name=user_name,
+            )
+            session.add(participant)
+            await session.commit()
+            return participant
+
+    # 获取参赛者
+    async def get_participant(self, match_id: int, user_id: str) -> Optional[MatchParticipant]:
+        """
+        获取指定比赛的指定参赛者
+
+        参数:
+            match_id: 比赛ID
+            user_id: 用户ID
+
+        返回:
+            参赛者对象，如果不存在则返回None
+        """
+        async with self.db.get_session() as session:
+            stmt = select(MatchParticipant).where(
+                and_(
+                    MatchParticipant.match_id == match_id,
+                    MatchParticipant.user_id == user_id
+                )
+            )
+            result = await session.execute(stmt)
+            return result.scalar_one_or_none()
+
+    # 获取所有参赛者
+    async def get_participants(self, match_id: int) -> List[MatchParticipant]:
+        """
+        获取指定比赛的所有参赛者
+
+        参数:
+            match_id: 比赛ID
+
+        返回:
+            参赛者对象列表
+        """
+        async with self.db.get_session() as session:
+            stmt = select(MatchParticipant).where(MatchParticipant.match_id == match_id)
+            result = await session.execute(stmt)
+            return list(result.scalars().all())
+
+    # 增加参赛者得分
+    async def increment_participant_score(self, match_id: int, user_id: str):
+        """
+        增加参赛者的正确答题数和分数
+
+        参数:
+            match_id: 比赛ID
+            user_id: 用户ID
+        """
+        async with self.db.get_session() as session:
+            stmt = select(MatchParticipant).where(
+                and_(
+                    MatchParticipant.match_id == match_id,
+                    MatchParticipant.user_id == user_id
+                )
+            )
+            result = await session.execute(stmt)
+            participant = result.scalar_one_or_none()
+            if participant:
+                participant.correct_count += 1
+                participant.score = participant.correct_count - participant.wrong_count / 3.0
+                await session.commit()
+
+    # 增加参赛者错误数
+    async def increment_participant_wrong(self, match_id: int, user_id: str):
+        """
+        增加参赛者的错误答题数并更新分数
+
+        参数:
+            match_id: 比赛ID
+            user_id: 用户ID
+        """
+        async with self.db.get_session() as session:
+            stmt = select(MatchParticipant).where(
+                and_(
+                    MatchParticipant.match_id == match_id,
+                    MatchParticipant.user_id == user_id
+                )
+            )
+            result = await session.execute(stmt)
+            participant = result.scalar_one_or_none()
+            if participant:
+                participant.wrong_count += 1
+                participant.score = participant.correct_count - participant.wrong_count / 3.0
+                await session.commit()
+
+    # 保存荣誉记录
+    async def save_honor(self, user_id: str, match_id: int, match_name: str, rank: int, correct_count: int, wrong_count: int = 0, score: float = 0.0):
+        """
+        保存用户的比赛荣誉记录
+
+        参数:
+            user_id: 用户ID
+            match_id: 比赛ID
+            match_name: 比赛名称
+            rank: 排名
+            correct_count: 正确答题数
+            wrong_count: 错误答题数（默认为0）
+            score: 最终得分（默认为0.0）
+        """
+        medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+        medal = medals.get(rank, f"{rank}名")
+        async with self.db.get_session() as session:
+            # match_id=0 为“虚拟比赛ID”（手动授予荣誉），不适用按 match_id 去重
+            if match_id != 0:
+                existing_stmt = select(MatchHonor).where(
+                    and_(MatchHonor.user_id == user_id, MatchHonor.match_id == match_id)
+                )
+                result = await session.execute(existing_stmt)
+                existing_list = list(result.scalars().all())
+
+                if existing_list:
+                    keep = existing_list[0]
+                    keep.match_name = match_name
+                    keep.rank = rank
+                    keep.correct_count = correct_count
+                    keep.wrong_count = wrong_count
+                    keep.score = score
+                    keep.medal = medal
+
+                    # 兼容历史重复数据：清理多余的重复荣誉记录
+                    for extra in existing_list[1:]:
+                        try:
+                            session.delete(extra)
+                        except Exception:
+                            pass
+
+                    await session.commit()
+                    return
+
+            honor = MatchHonor(
+                user_id=user_id, match_id=match_id, match_name=match_name,
+                rank=rank, correct_count=correct_count, wrong_count=wrong_count,
+                score=score, medal=medal
+            )
+            session.add(honor)
+            await session.commit()
+
+    # 获取用户荣誉
+    async def get_user_honors(self, user_id: str) -> List[MatchHonor]:
+        """
+        获取用户的荣誉记录
+
+        参数:
+            user_id: 用户ID
+
+        返回:
+            荣誉记录列表，按排名降序排列
+        """
+        async with self.db.get_session() as session:
+            stmt = select(MatchHonor).where(MatchHonor.user_id == user_id).order_by(desc(MatchHonor.rank))
+            result = await session.execute(stmt)
+            honors = list(result.scalars().all())
+
+            # 兼容历史数据：同一场比赛可能被重复写入荣誉，名片展示时去重
+            deduped: list[MatchHonor] = []
+            seen_match_ids: set[int] = set()
+            seen_virtual: set[tuple] = set()
+            for h in honors:
+                mid = getattr(h, "match_id", 0) or 0
+                if mid != 0:
+                    if int(mid) in seen_match_ids:
+                        continue
+                    seen_match_ids.add(int(mid))
+                else:
+                    key = (
+                        str(getattr(h, "match_name", "") or ""),
+                        int(getattr(h, "rank", 0) or 0),
+                        int(getattr(h, "correct_count", 0) or 0),
+                        int(getattr(h, "wrong_count", 0) or 0),
+                        float(getattr(h, "score", 0.0) or 0.0),
+                    )
+                    if key in seen_virtual:
+                        continue
+                    seen_virtual.add(key)
+                deduped.append(h)
+
+            return deduped
+
+    # 重置用户荣誉
+    async def reset_user_honors(self, user_id: str):
+        """
+        重置指定用户的所有荣誉数据
+
+        参数:
+            user_id: 用户ID
+        """
+        async with self.db.get_session() as session:
+            stmt = delete(MatchHonor).where(MatchHonor.user_id == user_id)
+            await session.execute(stmt)
+            await session.commit()
+
+    # 重置所有荣誉
+    async def reset_all_honors(self):
+        """
+        重置所有用户的荣誉数据
+        """
+        async with self.db.get_session() as session:
+            stmt = delete(MatchHonor)
+            await session.execute(stmt)
+            await session.commit()
