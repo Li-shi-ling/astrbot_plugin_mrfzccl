@@ -57,13 +57,13 @@
     "description": "比赛答题数量限制(0表示不限制)",
     "type": "int",
     "default": 0,
-    "hint": "答完指定数量自动结束"
+    "hint": "答完指定数量自动结束,在创建比赛时不填写默认使用该值"
   },
   "match_time_limit": {
     "description": "比赛时间限制(分钟,0表示不限制)",
     "type": "int",
     "default": 0,
-    "hint": "超过指定时间自动结束"
+    "hint": "超过指定时间自动结束,在创建比赛时不填写默认使用该值"
   },
   "match_hint_delay": {
     "description": "比赛超时自动提示(秒,0表示关闭)",

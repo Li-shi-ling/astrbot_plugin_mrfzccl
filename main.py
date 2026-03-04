@@ -677,8 +677,12 @@ class Mrfzccl(Star):
             return
 
         # 设置题目限制和时间限制
-        q_limit = question_limit if question_limit > 0 else self.match_question_limit
-        t_limit = time_limit if time_limit > 0 else self.match_time_limit
+        q_limit = question_limit if question_limit >= 0 else self.match_question_limit
+        t_limit = time_limit if time_limit >= 0 else self.match_time_limit
+
+        if q_limit < 0 or t_limit < 0:
+            yield event.plain_result(f"参数未通过检验,q_limit:{q_limit},t_limit:{t_limit}")
+            return
 
         # 创建比赛名称
         match_name = name if name else f"比赛_{int(time.time())}"
