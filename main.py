@@ -423,7 +423,7 @@ class Mrfzccl(Star):
             yield event.plain_result("没有初始化房间,请使用/fc")
             return
 
-        hint_text = self._next_hint_text_and_advance(user_id)
+        hint_text, _ = self._next_hint_text_and_advance(user_id)
         yield event.plain_result(hint_text)
 
         # 更新用户提示使用次数
@@ -1032,10 +1032,16 @@ class Mrfzccl(Star):
 
         return match_name, match_id, top_participants
 
-    def _next_hint_text_and_advance(self, user_id: str) -> str:
-        """生成下一条提示，并将 fctn +1（不含任何权限/活跃检查）。"""
+    def _next_hint_text_and_advance(self, user_id: str) -> tuple[str, bool]:
+        """生成下一条提示，并将 fctn +1（不含任何权限/活跃检查）。
+
+        返回:
+            (hint_text, has_more)
+            has_more=False 表示本题已无更多有效提示（通常为名称已全部揭示）。
+        """
         fctn = int(self.player.get(user_id, {}).get("fctn", 0) or 0)
         name = str(self.player.get(user_id, {}).get("name", "") or "")
+        has_more = True
 
         if fctn <= 3:
             key = self.fct_key.get(fctn, "")
@@ -1056,17 +1062,19 @@ class Mrfzccl(Star):
             # 名称提示：每次出现增加 1/3（向上取整）
             if not name:
                 text = "无法获取干员名称"
+                has_more = False
             else:
                 chunk = max(1, (len(name) + 2) // 3)  # ceil(len/3)
                 step = max(1, fctn - 3)  # 1,2,3...
                 reveal_len = min(len(name), chunk * step)
                 text = f"这个干员的前{reveal_len}个字为:{name[:reveal_len]}"
+                has_more = reveal_len < len(name)
 
         # 递增提示计数
         if user_id in self.player:
             self.player[user_id]["fctn"] = fctn + 1
 
-        return text
+        return text, has_more
 
     def _schedule_match_hint(self, group_id: str) -> None:
         """为当前题目安排一次“超时自动提示”。delay<=0 时不启用。"""
@@ -1081,39 +1089,53 @@ class Mrfzccl(Star):
         if not session:
             return
 
+        token = self.match_question_state.get(group_id)
+        if not token:
+            return
+
         # 取消旧任务
         if group_id in self.match_next_task:
             self._safe_cancel_task(self.match_next_task.pop(group_id, None))
 
         self.match_next_task[group_id] = asyncio.create_task(
-            self._match_hint_after_delay(group_id, session, delay)
+            self._match_hint_after_delay(group_id, session, delay, float(token))
         )
 
-    async def _match_hint_after_delay(self, group_id: str, session: str, delay: int) -> None:
+    async def _match_hint_after_delay(self, group_id: str, session: str, delay: int, token: float) -> None:
         try:
-            await asyncio.sleep(max(1, int(delay)))
+            interval = max(1, int(delay))
+            while True:
+                await asyncio.sleep(interval)
 
-            if self._shutting_down:
-                return
-
-            match = await self.match_repo.get_active_match(group_id)
-            if not match or not match.is_active:
-                return
-
-            if not has_active_game(self.player, group_id):
-                return
-
-            lock = self._get_match_lock(group_id)
-            async with lock:
-                # 二次确认：避免刚好答对/结束后仍发送提示
-                match2 = await self.match_repo.get_active_match(group_id)
-                if not match2 or not match2.is_active:
+                if self._shutting_down:
                     return
+
+                # 题目已变化/被清理：停止当前提示循环
+                if self.match_question_state.get(group_id) != token:
+                    return
+
+                match = await self.match_repo.get_active_match(group_id)
+                if not match or not match.is_active:
+                    return
+
                 if not has_active_game(self.player, group_id):
                     return
-                hint_text = self._next_hint_text_and_advance(group_id)
 
-            await self.context.send_message(session, MessageChain().message(f"💡 超时提示：{hint_text}"))
+                lock = self._get_match_lock(group_id)
+                async with lock:
+                    # 二次确认：避免刚好答对/结束/切题后仍发送提示
+                    if self.match_question_state.get(group_id) != token:
+                        return
+                    match2 = await self.match_repo.get_active_match(group_id)
+                    if not match2 or not match2.is_active:
+                        return
+                    if not has_active_game(self.player, group_id):
+                        return
+                    hint_text, has_more = self._next_hint_text_and_advance(group_id)
+
+                await self.context.send_message(session, MessageChain().message(f"💡 超时提示：{hint_text}"))
+                if not has_more:
+                    return
 
         except asyncio.CancelledError:
             return
