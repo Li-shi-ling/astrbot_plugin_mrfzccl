@@ -634,8 +634,8 @@ class Mrfzccl(Star):
     # 创建比赛命令
     @ccl.command("比赛创建")
     async def match_create(self, event: AstrMessageEvent, name: str = "", question_limit: int = 0, time_limit: int = 0):
-        """创建比赛（仅管理员）用法: /ccl比赛创建 [名称] [题目限制] [时间限制(分钟)]
-        例如: /ccl春节赛 20 30 表示创建名称为"春节赛"、答完20题自动结束、最多30分钟的比赛
+        """创建比赛（仅管理员）用法: /ccl 比赛创建 [名称] [题目限制] [时间限制(分钟)]
+        例如: /ccl 比赛创建 春节赛 20 30 表示创建名称为"春节赛"、答完20题自动结束、最多30分钟的比赛
         题目限制填0表示不限制，时间限制填0表示不限制。比赛开始后，参与答题的用户自动成为参赛者"""
         group_id_raw = event.get_group_id()
         if group_id_raw is None:
@@ -676,7 +676,7 @@ class Mrfzccl(Star):
     # 比赛游戏循环
     @ccl.command("比赛开始")
     async def match_start(self, event: AstrMessageEvent):
-        """开始比赛（仅管理员）"""
+        """使用`/ccl 比赛开始`开始比赛（仅管理员）"""
         group_id_raw = event.get_group_id()
         if group_id_raw is None:
             yield event.plain_result("请在群聊使用")
@@ -730,7 +730,7 @@ class Mrfzccl(Star):
     # 结束比赛命令
     @ccl.command("比赛结束")
     async def match_end(self, event: AstrMessageEvent):
-        """结束比赛"""
+        """使用`/ccl 比赛结束`结束比赛（仅管理员）"""
         group_id_raw = event.get_group_id()
         if group_id_raw is None:
             yield event.plain_result("请在群聊使用")
@@ -768,7 +768,7 @@ class Mrfzccl(Star):
     # 比赛排行榜命令
     @ccl.command("比赛排行")
     async def match_leaderboard(self, event: AstrMessageEvent):
-        """比赛排行榜"""
+        """使用`/ccl 比赛排行`获取比赛排行榜"""
         group_id_raw = event.get_group_id()
         if group_id_raw is None:
             yield event.plain_result("请在群聊使用")
