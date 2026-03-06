@@ -979,6 +979,7 @@ class Mrfzccl(Star):
         self.player.pop(user_id, None)
         self.original_images.pop(user_id, None)
 
+    # 获取指定房间的比赛锁
     def _get_match_lock(self, room_id: str) -> asyncio.Lock:
         now = time.time()
         self._room_lock_last_used[room_id] = now
@@ -990,6 +991,7 @@ class Mrfzccl(Star):
 
         return lock
 
+    # 判断指定房间是否仍有运行中的比赛任务
     def _room_has_runtime(self, room_id: str) -> bool:
         """判断该 room_id 是否仍有运行态（游戏/比赛任务）"""
         data = self.player.get(room_id)
@@ -1007,6 +1009,7 @@ class Mrfzccl(Star):
 
         return False
 
+    # 清理长期闲置的房间锁，防止内存泄漏
     def _cleanup_stale_room_locks(self, max_idle_hours: int = 24) -> int:
         """清理长期闲置的 room lock，避免锁字典无限增长。"""
         try:
@@ -1031,6 +1034,7 @@ class Mrfzccl(Star):
 
         return removed
 
+    # 安全取消异步任务
     @staticmethod
     def _safe_cancel_task(task: asyncio.Task | None) -> None:
         if not task:
@@ -1041,6 +1045,7 @@ class Mrfzccl(Star):
         except Exception:
             pass
 
+    #  清理指定群组的比赛运行时状态
     def _clear_match_runtime(self, group_id: str) -> None:
         self.match_question_state.pop(group_id, None)
 
@@ -1060,6 +1065,7 @@ class Mrfzccl(Star):
         # 清理当前群的题目状态（防止比赛结束后仍可继续答题）
         self.end_game(group_id)
 
+    # 获取比赛结束原因
     async def _get_match_end_reason(self, match) -> str | None:
         """返回比赛结束原因（time_limit/question_limit），不满足则返回 None。"""
         if not match:
@@ -1097,6 +1103,7 @@ class Mrfzccl(Star):
 
         return None
 
+    # 结束比赛并收集前十名参赛者
     async def _end_match_and_collect_top(self, group_id: str, match) -> tuple[str, int, list]:
         """结束比赛 + 清理运行态 + 返回 Top10 参赛者（已按得分排序），并保存荣誉。"""
         match_name = getattr(match, "match_name", "比赛")
@@ -1117,6 +1124,7 @@ class Mrfzccl(Star):
 
         return match_name, match_id, top_participants
 
+    # 生成下一条提示文本并推进提示计数
     def _next_hint_text_and_advance(self, user_id: str) -> tuple[str, bool]:
         """生成下一条提示，并将 fctn +1（不含任何权限/活跃检查）。
 
@@ -1161,6 +1169,7 @@ class Mrfzccl(Star):
 
         return text, has_more
 
+    # 为当前题目安排超时自动提示
     def _schedule_match_hint(self, group_id: str) -> None:
         """为当前题目安排一次“超时自动提示”。delay<=0 时不启用。"""
         try:
@@ -1186,6 +1195,7 @@ class Mrfzccl(Star):
             self._match_hint_after_delay(group_id, session, delay, float(token))
         )
 
+    # 延迟后执行自动提示的循环任务
     async def _match_hint_after_delay(self, group_id: str, session: str, delay: int, token: float) -> None:
         try:
             interval = max(1, int(delay))
