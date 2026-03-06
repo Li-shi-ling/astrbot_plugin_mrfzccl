@@ -1,6 +1,5 @@
 from .QnAStatsRenderer import QnAStatsRenderer
 
-
 class QnAStatsRendererRetroWin(QnAStatsRenderer):
     """
     复古 Win / 像素风主题渲染器。
@@ -13,4 +12,3 @@ class QnAStatsRendererRetroWin(QnAStatsRenderer):
 
     def __init__(self, output_dir: str = "data/quiz_images"):
         super().__init__(output_dir=output_dir, theme="retro_win")
-

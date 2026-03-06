@@ -21,7 +21,6 @@ except ImportError:
 
 from .db.tables import MatchHonor, MatchParticipant, UserQnAStats
 
-
 class QnAStatsRenderer:
     """
     问答统计图片渲染器（HTML -> Image）。
@@ -59,7 +58,6 @@ class QnAStatsRenderer:
         self._avatar_timeout_seconds = 4
 
     # ======================= helpers =======================
-
     @staticmethod
     def _esc(value: Any) -> str:
         return html.escape(str(value), quote=True)
@@ -163,7 +161,6 @@ class QnAStatsRenderer:
         return avatar_map
 
     # ======================= CSS =======================
-
     def _theme_css(self) -> str:
         if self.theme in {"light", "white"}:
             return """
@@ -866,7 +863,6 @@ class QnAStatsRenderer:
         """
 
     # ======================= size =======================
-
     def _calc_table_height(self, row_count: int) -> int:
         return (
             self.BASE_HEIGHT
@@ -876,7 +872,6 @@ class QnAStatsRenderer:
         )
 
     # ======================= render core =======================
-
     def _build_html(self, body_html: str, title: str) -> str:
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         is_retro = self.theme in {"retro_win", "retro", "win95", "win"}
@@ -934,7 +929,6 @@ class QnAStatsRenderer:
         return self._html_to_image(html_str, filename, self.CARD_WIDTH, height)
 
     # ======================= body builders (HTML) =======================
-
     def _build_leaderboard_body(
         self,
         users: List[UserQnAStats],
@@ -1161,7 +1155,6 @@ class QnAStatsRenderer:
         return self._build_user_profile_body_with_avatar(u, rank, avatar_data_url=None)
 
     # ======================= Public APIs =======================
-
     async def generate_correct_leaderboard_image(self, users: List[UserQnAStats]) -> str:
         avatar_map = await self._download_avatar_map([getattr(u, "user_id", "") for u in users])
         body = self._build_leaderboard_body(
