@@ -224,10 +224,12 @@ class Mrfzccl(Star):
 
         # 检查是否在比赛模式和是否限制（仅群聊）
         match = await self.match_repo.get_active_match(str(group_id)) if is_group else None
-        # 非比赛模式下检查每日限制
-        if not match and not check_daily_limit(user_id, self.daily_counter, self.daily_limit):
-            yield event.plain_result(f"今日游戏次数已达上限({self.daily_limit}次)，请明天再来！")
-            return
+        # 非管理员进行次数检测
+        if self.admin_ids and sender_id not in [str(x) for x in self.admin_ids]:
+            # 非比赛模式下检查每日限制
+            if not match and not check_daily_limit(sender_id, self.daily_counter, self.daily_limit):
+                yield event.plain_result(f"今日游戏次数已达上限({self.daily_limit}次)，请明天再来！")
+                return
 
         try:
             # 调用初始化游戏方法
@@ -500,7 +502,7 @@ class Mrfzccl(Star):
         self.player[user_id]["fctn"] = 4
         # 更新用户提示使用次数
         await self.user_qna_repo.increment_tip_count(
-            user_id=event.get_sender_id(),
+            user_id=sender_id,
             user_name=event.get_sender_name(),
             increment=3
         )
@@ -517,9 +519,9 @@ class Mrfzccl(Star):
     async def correct_answers_leaderboard(self, event: AstrMessageEvent):
         """获取正确个数的排行榜 /ccl 排行榜"""
         if self.require_admin:
-            user_id = str(event.get_sender_id())
+            sender_id = str(event.get_sender_id())
             # 检查管理员权限
-            if self.admin_ids and user_id not in [str(x) for x in self.admin_ids]:
+            if self.admin_ids and sender_id not in [str(x) for x in self.admin_ids]:
                 yield event.plain_result("❌ 只有管理员可以查看排行榜")
                 return
         try:
@@ -549,9 +551,9 @@ class Mrfzccl(Star):
     async def wrong_answers_leaderboard(self, event: AstrMessageEvent):
         """获取错误个数的排行榜 /ccl 错误排行榜"""
         if self.require_admin:
-            user_id = str(event.get_sender_id())
+            sender_id = str(event.get_sender_id())
             # 检查管理员权限
-            if self.admin_ids and user_id not in [str(x) for x in self.admin_ids]:
+            if self.admin_ids and sender_id not in [str(x) for x in self.admin_ids]:
                 yield event.plain_result("❌ 只有管理员可以查看排行榜")
                 return
         try:
@@ -578,9 +580,9 @@ class Mrfzccl(Star):
     async def hints_usage_leaderboard(self, event: AstrMessageEvent):
         """获取使用提示次数的排行榜 /ccl 提示排行榜"""
         if self.require_admin:
-            user_id = str(event.get_sender_id())
+            sender_id = str(event.get_sender_id())
             # 检查管理员权限
-            if self.admin_ids and user_id not in [str(x) for x in self.admin_ids]:
+            if self.admin_ids and sender_id not in [str(x) for x in self.admin_ids]:
                 yield event.plain_result("❌ 只有管理员可以查看排行榜")
                 return
         try:
@@ -663,11 +665,11 @@ class Mrfzccl(Star):
         if group_id_raw is None:
             yield event.plain_result("请在群聊使用")
             return
-        user_id = str(event.get_sender_id())
         group_id = str(group_id_raw)
+        sender_id = str(event.get_sender_id())
 
         # 检查管理员权限
-        if self.admin_ids and user_id not in [str(x) for x in self.admin_ids]:
+        if self.admin_ids and sender_id not in [str(x) for x in self.admin_ids]:
             yield event.plain_result("❌ 只有管理员可以创建比赛")
             return
 
@@ -707,12 +709,12 @@ class Mrfzccl(Star):
         if group_id_raw is None:
             yield event.plain_result("请在群聊使用")
             return
-        user_id = str(event.get_sender_id())
+        sender_id = str(event.get_sender_id())
         group_id = str(group_id_raw)
         self.match_sessions[group_id] = event.unified_msg_origin
 
         # 检查管理员权限
-        if self.admin_ids and user_id not in [str(x) for x in self.admin_ids]:
+        if self.admin_ids and sender_id not in [str(x) for x in self.admin_ids]:
             yield event.plain_result("❌ 只有管理员可以开始比赛")
             return
 
@@ -761,11 +763,11 @@ class Mrfzccl(Star):
         if group_id_raw is None:
             yield event.plain_result("请在群聊使用")
             return
-        user_id = str(event.get_sender_id())
+        sender_id = str(event.get_sender_id())
         group_id = str(group_id_raw)
 
         # 检查管理员权限
-        if self.admin_ids and user_id not in [str(x) for x in self.admin_ids]:
+        if self.admin_ids and sender_id not in [str(x) for x in self.admin_ids]:
             yield event.plain_result("❌ 只有管理员可以结束比赛")
             return
 
@@ -832,10 +834,10 @@ class Mrfzccl(Star):
     @ccl.command("清除数据")
     async def reset_user_data(self, event: AstrMessageEvent, target_user_id: str = ""):
         """清除用户答题数据（仅管理员）/ccl 清除数据 [user_id]"""
-        user_id = str(event.get_sender_id())
+        sender_id = str(event.get_sender_id())
 
         # 检查管理员权限
-        if self.admin_ids and user_id not in [str(x) for x in self.admin_ids]:
+        if self.admin_ids and sender_id not in [str(x) for x in self.admin_ids]:
             yield event.plain_result("❌ 只有管理员可以清除数据")
             return
 
@@ -850,10 +852,10 @@ class Mrfzccl(Star):
     @ccl.command("清除荣誉")
     async def reset_user_honors_cmd(self, event: AstrMessageEvent, target_user_id: str = ""):
         """清除用户荣誉数据（仅管理员）/ccl 清除荣誉 [user_id]"""
-        user_id = str(event.get_sender_id())
+        sender_id = str(event.get_sender_id())
 
         # 检查管理员权限
-        if self.admin_ids and user_id not in [str(x) for x in self.admin_ids]:
+        if self.admin_ids and sender_id not in [str(x) for x in self.admin_ids]:
             yield event.plain_result("❌ 只有管理员可以清除荣誉")
             return
 
@@ -868,10 +870,10 @@ class Mrfzccl(Star):
     @ccl.command("清除所有数据")
     async def reset_all_data_cmd(self, event: AstrMessageEvent):
         """清除所有用户的答题数据（仅管理员）/ccl 清除所有数据"""
-        user_id = str(event.get_sender_id())
+        sender_id = str(event.get_sender_id())
 
         # 检查管理员权限
-        if self.admin_ids and user_id not in [str(x) for x in self.admin_ids]:
+        if self.admin_ids and sender_id not in [str(x) for x in self.admin_ids]:
             yield event.plain_result("❌ 只有管理员可以清除所有数据")
             return
 
@@ -882,10 +884,10 @@ class Mrfzccl(Star):
     @ccl.command("清除所有荣誉")
     async def reset_all_honors_cmd(self, event: AstrMessageEvent):
         """清除所有用户的荣誉数据（仅管理员）/ccl 清除所有荣誉"""
-        user_id = str(event.get_sender_id())
+        sender_id = str(event.get_sender_id())
 
         # 检查管理员权限
-        if self.admin_ids and user_id not in [str(x) for x in self.admin_ids]:
+        if self.admin_ids and sender_id not in [str(x) for x in self.admin_ids]:
             yield event.plain_result("❌ 只有管理员可以清除所有荣誉")
             return
 
@@ -897,10 +899,10 @@ class Mrfzccl(Star):
     async def grant_honor_cmd(self, event: AstrMessageEvent, target_user_id: str = "", rank: int = 1, match_name: str = "", correct_count: int = 0):
         """授予用户特定荣誉（仅管理员）/ccl 授予荣誉 [user_id] [名次] [比赛名称] [答对数量]
         例如: /ccl 授予荣誉 123456 1 测试赛 10"""
-        user_id = str(event.get_sender_id())
+        sender_id = str(event.get_sender_id())
 
         # 检查管理员权限
-        if self.admin_ids and user_id not in [str(x) for x in self.admin_ids]:
+        if self.admin_ids and sender_id not in [str(x) for x in self.admin_ids]:
             yield event.plain_result("❌ 只有管理员可以授予荣誉")
             return
 
@@ -934,7 +936,8 @@ class Mrfzccl(Star):
         )
 
         yield event.plain_result(
-            f"✅ 已授予用户 {target_user_id} 荣誉: {medal} {match_name} 第{rank}名, 答对{correct_count}题")
+            f"✅ 已授予用户 {target_user_id} 荣誉: {medal} {match_name} 第{rank}名, 答对{correct_count}题"
+        )
 
     # ========== 工具类相关函数 ==========
     # 发送原始图片
