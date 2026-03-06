@@ -22,7 +22,7 @@ async def handle_reset_user_data(
         await self.user_qna_repo.reset_user_stats(target_user_id)
         yield event.plain_result(f"✅ 用户 {target_user_id} 的答题数据已清除")
     else:
-        await self.user_qna_repo.reset_user_stats(user_id)
+        await self.user_qna_repo.reset_user_stats(sender_id)
         yield event.plain_result("✅ 您的答题数据已清除")
 
 
@@ -43,7 +43,7 @@ async def handle_reset_user_honors_cmd(
         await self.match_repo.reset_user_honors(target_user_id)
         yield event.plain_result(f"✅ 用户 {target_user_id} 的荣誉数据已清除")
     else:
-        await self.match_repo.reset_user_honors(user_id)
+        await self.match_repo.reset_user_honors(sender_id)
         yield event.plain_result("✅ 您的荣誉数据已清除")
 
 

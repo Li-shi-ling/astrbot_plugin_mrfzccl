@@ -19,7 +19,6 @@ from ..tool import (
     resolve_alias,
 )
 
-
 async def handle_fc(
     self,
     event: AstrMessageEvent,
@@ -76,7 +75,6 @@ async def handle_fc(
             response = event.plain_result("游戏初始化失败，请稍后重试")
 
     return response
-
 
 async def handle_fcc(
     self,
@@ -220,7 +218,6 @@ async def handle_fcc(
 
     return responses, match_end_payload
 
-
 async def iter_match_end_leaderboard(
     self,
     event: AstrMessageEvent,
@@ -242,7 +239,6 @@ async def iter_match_end_leaderboard(
         ),
     ):
         yield result
-
 
 async def handle_fce(
     self,
@@ -273,7 +269,6 @@ async def handle_fce(
 
     return responses
 
-
 async def handle_fct(
     self,
     event: AstrMessageEvent,
@@ -303,7 +298,6 @@ async def handle_fct(
         )
 
     return response
-
 
 async def handle_fcw(
     self,
@@ -355,4 +349,3 @@ async def handle_fcw(
         )
 
     return response
-

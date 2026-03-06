@@ -1188,6 +1188,7 @@ class Mrfzccl(Star):
         image.save(buf, format=format, optimize=True)  # optimize优化图片大小
         return buf.getvalue()
 
+    # 主动消息发送比赛排行榜
     async def _send_match_leaderboard_to_session(
         self,
         session: str,

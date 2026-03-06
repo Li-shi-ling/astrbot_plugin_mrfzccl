@@ -8,7 +8,6 @@ from astrbot.api.event import AstrMessageEvent
 
 from ..tool import generate_image_or_fallback, generate_match_leaderboard_text
 
-
 async def handle_match_help(self, event: AstrMessageEvent) -> AsyncIterator[Any]:
     """比赛模式帮助"""
     if event.get_group_id() is None:
@@ -23,7 +22,6 @@ async def handle_match_help(self, event: AstrMessageEvent) -> AsyncIterator[Any]
 /ccl 比赛排行/排行   - 查看比赛排行榜
 ━━━━━━━━━━━━━━"""
     )
-
 
 async def handle_match_create(
     self,
@@ -73,7 +71,6 @@ async def handle_match_create(
     info += "\n进行答题即可参与比赛"
     yield event.plain_result(info)
 
-
 async def match_start_precheck(self, event: AstrMessageEvent) -> tuple[bool, str | None, Any | None]:
     """`/ccl 比赛开始` 的锁外校验与 DB 状态更新。"""
     group_id_raw = event.get_group_id()
@@ -98,7 +95,6 @@ async def match_start_precheck(self, event: AstrMessageEvent) -> tuple[bool, str
 
     return True, group_id, None
 
-
 async def match_start_inlock(self, group_id: str) -> bytes | str | None:
     """`/ccl 比赛开始` 的锁内状态清理 + 出题逻辑。"""
     # 防止上次比赛残留题目导致 fc_init 返回 already_exists
@@ -119,7 +115,6 @@ async def match_start_inlock(self, group_id: str) -> bytes | str | None:
 
     return result
 
-
 def build_match_start_response(event: AstrMessageEvent, result: bytes | str | None) -> Any:
     if result and result != "already_exists":
         return event.chain_result(
@@ -129,7 +124,6 @@ def build_match_start_response(event: AstrMessageEvent, result: bytes | str | No
             ]
         )
     return event.plain_result("🏁 比赛已开始！第一题获取失败，请重试")
-
 
 async def match_end_precheck(self, event: AstrMessageEvent) -> tuple[bool, str | None, Any | None]:
     """`/ccl 比赛结束` 的锁外校验。"""
@@ -146,7 +140,6 @@ async def match_end_precheck(self, event: AstrMessageEvent) -> tuple[bool, str |
 
     return True, group_id, None
 
-
 async def match_end_inlock(self, group_id: str) -> tuple[bool, str, list]:
     """`/ccl 比赛结束` 的锁内结算逻辑。"""
     # 重新获取活跃比赛，避免与自动结束并发导致重复荣誉
@@ -156,7 +149,6 @@ async def match_end_inlock(self, group_id: str) -> tuple[bool, str, list]:
 
     match_name, _, top_participants = await self._end_match_and_collect_top(group_id, match_now)
     return True, match_name, top_participants
-
 
 async def iter_match_end_results(
     self,
@@ -175,7 +167,6 @@ async def iter_match_end_results(
         generate_text_func=lambda: generate_match_leaderboard_text(match_name, top_participants, ended=True),
     ):
         yield result
-
 
 async def handle_match_leaderboard(self, event: AstrMessageEvent) -> AsyncIterator[Any]:
     """使用`/ccl 比赛排行`获取比赛排行榜"""
@@ -206,4 +197,3 @@ async def handle_match_leaderboard(self, event: AstrMessageEvent) -> AsyncIterat
         generate_text_func=lambda: generate_match_leaderboard_text(match.match_name, top_participants),
     ):
         yield result
-

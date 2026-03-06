@@ -12,7 +12,6 @@ from ..tool import (
     generate_wrong_leaderboard_text,
 )
 
-
 async def handle_correct_answers_leaderboard(self, event: AstrMessageEvent) -> AsyncIterator[Any]:
     """获取正确个数的排行榜命令 /ccl 排行榜"""
     if self.require_admin:
@@ -44,7 +43,6 @@ async def handle_correct_answers_leaderboard(self, event: AstrMessageEvent) -> A
     except Exception as e:
         yield event.plain_result(f"获取排行榜时出现错误: {str(e)}")
 
-
 async def handle_wrong_answers_leaderboard(self, event: AstrMessageEvent) -> AsyncIterator[Any]:
     """获取错误个数的排行榜命令 /ccl 错误排行榜"""
     if self.require_admin:
@@ -73,7 +71,6 @@ async def handle_wrong_answers_leaderboard(self, event: AstrMessageEvent) -> Asy
     except Exception as e:
         yield event.plain_result(f"获取排行榜时出现错误: {str(e)}")
 
-
 async def handle_hints_usage_leaderboard(self, event: AstrMessageEvent) -> AsyncIterator[Any]:
     """获取使用提示次数的排行榜命令 /ccl 提示排行榜"""
     if self.require_admin:
@@ -101,7 +98,6 @@ async def handle_hints_usage_leaderboard(self, event: AstrMessageEvent) -> Async
 
     except Exception as e:
         yield event.plain_result(f"获取排行榜时出现错误: {str(e)}")
-
 
 async def handle_user_profile_retrieval(
     self,
@@ -139,4 +135,3 @@ async def handle_user_profile_retrieval(
 
     except Exception as e:
         yield event.plain_result(f"获取用户信息时出现错误: {str(e)}")
-
