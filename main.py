@@ -27,6 +27,7 @@ from datetime import datetime, timedelta
 from difflib import SequenceMatcher
 from urllib.parse import urlparse
 from io import BytesIO
+from pathlib import Path
 from PIL import Image
 import numpy as np
 import traceback
@@ -140,12 +141,12 @@ class Mrfzccl(Star):
         self.match_repo = MatchRepo(self.db)  # 比赛仓库
 
         # 构建临时图片路径
-        self.img_tmp_path = os.path.join(self.storage_dir, "tmp")
-        os.makedirs(self.img_tmp_path, exist_ok=True)
+        self.img_tmp_path = Path(self.storage_dir) / "tmp"
+        self.img_tmp_path.mkdir(parents=True, exist_ok=True)
 
         # 初始化问答统计渲染器
         renderer_theme = self.Config.get("renderer_theme", "light")
-        self.renderer = QnAStatsRenderer(output_dir=self.img_tmp_path, theme=renderer_theme)
+        self.renderer = QnAStatsRenderer(output_dir=str(self.img_tmp_path), theme=renderer_theme)
         logger.info(f"[Mrfzccl] 渲染主题: {renderer_theme}")
 
         # 构建数据文件路径
