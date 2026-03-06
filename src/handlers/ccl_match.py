@@ -17,7 +17,7 @@ async def handle_match_help(self, event: AstrMessageEvent) -> AsyncIterator[Any]
     yield event.plain_result(
         """📋 比赛模式指令帮助
 ━━━━━━━━━━━━━━
-/ccl 比赛创建 [名称] - 创建比赛(仅管理员)
+/ccl 比赛创建 [名称] [题目限制] [时间限制(分钟)] - 创建比赛(仅管理员)
 /ccl 比赛开始        - 开始比赛(仅管理员)
 /ccl 比赛结束/结束比赛 - 结束比赛(仅管理员)
 /ccl 比赛排行/排行   - 查看比赛排行榜
@@ -70,7 +70,7 @@ async def handle_match_create(
         info += f"\n📝 题目限制: {q_limit}题"
     if t_limit > 0:
         info += f"\n⏱️ 时间限制: {t_limit}分钟"
-    info += "\n使用 /fcc 进行答题即可参与比赛"
+    info += "\n进行答题即可参与比赛"
     yield event.plain_result(info)
 
 
