@@ -4,3 +4,5 @@ desc: 明日方舟干员立绘猜猜乐，支持排行榜/名片/比赛模式 # 
 version: v1.1.9 # 插件版本号。格式：v1.1.1 或者 v1.1
 author: lishining # 作者
 repo: https://github.com/Li-shi-ling/astrbot_plugin_mrfzccl # 插件的仓库地址
+support_platforms:
+  - aiocqhttp
