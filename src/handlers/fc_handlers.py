@@ -20,15 +20,21 @@ from ..tool import (
 )
 
 # 判断是否为正确答案
-def _is_matching_answer(self, answer: str, guess: str) -> bool:
+def _get_answer_match_details(self, answer: str, guess: str) -> tuple[float, float, bool, bool]:
     similarity = SequenceMatcher(None, answer, guess).ratio()
     coverage = calculate_char_coverage_set(answer, guess)
     homophone_match = check_homophone(answer, guess, enable_homophone=self.enable_homophone)
-    return (
+    is_correct = (
         similarity > self.similarity_threshold
         or coverage > self.calculate_threshold
         or homophone_match
     )
+    return similarity, coverage, homophone_match, is_correct
+
+
+def _is_matching_answer(self, answer: str, guess: str) -> bool:
+    _, _, _, is_correct = _get_answer_match_details(self, answer, guess)
+    return is_correct
 
 # 判断是否为上一个题目的答题
 def _is_recent_previous_match_answer(self, player_state: dict[str, Any], guess: str) -> bool:
@@ -149,24 +155,23 @@ async def handle_fcc(
         )
         return responses, match_end_payload
 
-    correct_name = self.player[user_id]["name"]  # 获取正确答案
+    player_state = self.player[user_id]
+    correct_name = player_state["name"]  # current answer
 
     # 解析别名（将用户输入的别名转换为正式名称）
     resolved_guess = resolve_alias(guess_text, self.alias_map)
 
     # 计算相似度
-    similarity = SequenceMatcher(None, correct_name, resolved_guess).ratio()
-    # 计算字符覆盖率
-    calculate = calculate_char_coverage_set(correct_name, resolved_guess)
-    # 检查是否为同音字
-    homophone_match = check_homophone(correct_name, resolved_guess, enable_homophone=self.enable_homophone)
-    # 综合判断是否正确
-    is_correct = (similarity > self.similarity_threshold) or (calculate > self.calculate_threshold) or homophone_match
+    similarity, calculate, homophone_match, is_correct = _get_answer_match_details(
+        self,
+        correct_name,
+        resolved_guess,
+    )
     previous_answer_matched = False
     if is_group and match and group_id is not None:
         previous_answer_matched = _is_recent_previous_match_answer(
             self,
-            self.player.get(user_id, {}),
+            player_state,
             resolved_guess,
         )
 
