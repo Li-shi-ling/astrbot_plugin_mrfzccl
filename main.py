@@ -323,6 +323,41 @@ class Mrfzccl(Star):
         if response is not None:
             yield response
 
+    def _normalize_compact_fc_command(self, message_str: str) -> str | None:
+        message = re.sub(r"\s+", " ", (message_str or "").strip())
+        if not message:
+            return None
+
+        match = re.fullmatch(r"(fcc)(\S+)", message)
+        if not match:
+            return None
+
+        command, argument = match.groups()
+        if len(argument) > 16:
+            return None
+
+        if re.search(r"[，。！？、,.!?/\\\\]", argument):
+            return None
+
+        return f"{command} {argument}"
+
+    @filter.regex(r"^fcc\S+$")
+    async def fcregex(self, event: AstrMessageEvent):
+        if not getattr(event, "is_at_or_wake_command", False):
+            return
+
+        normalized = self._normalize_compact_fc_command(event.message_str)
+        if not normalized:
+            return
+
+        original_message = event.message_str
+        event.message_str = normalized
+        try:
+            async for result in self.fcc(event):
+                yield result
+        finally:
+            event.message_str = original_message
+
     # ========== ccl 相关指令 ==========
     # 创建命令组ccl
     @filter.command_group("ccl")
