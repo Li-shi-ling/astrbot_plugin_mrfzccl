@@ -19,6 +19,38 @@ from ..tool import (
     resolve_alias,
 )
 
+# 判断是否为正确答案
+def _is_matching_answer(self, answer: str, guess: str) -> bool:
+    similarity = SequenceMatcher(None, answer, guess).ratio()
+    coverage = calculate_char_coverage_set(answer, guess)
+    homophone_match = check_homophone(answer, guess, enable_homophone=self.enable_homophone)
+    return (
+        similarity > self.similarity_threshold
+        or coverage > self.calculate_threshold
+        or homophone_match
+    )
+
+# 判断是否为上一个题目的答题
+def _is_recent_previous_match_answer(self, player_state: dict[str, Any], guess: str) -> bool:
+    previous_answer = player_state.get("previous_answer")
+    switched_at = player_state.get("previous_answer_switched_at")
+    if not previous_answer or switched_at is None:
+        return False
+
+    grace_period = max(0.0, float(getattr(self, "match_answer_grace_period", 3.0) or 0.0))
+    if grace_period <= 0:
+        return False
+
+    try:
+        switched_at_ts = float(switched_at)
+    except (TypeError, ValueError):
+        return False
+
+    if time.time() - switched_at_ts > grace_period:
+        return False
+
+    return _is_matching_answer(self, str(previous_answer), guess)
+
 async def handle_fc(
     self,
     event: AstrMessageEvent,
@@ -130,6 +162,13 @@ async def handle_fcc(
     homophone_match = check_homophone(correct_name, resolved_guess, enable_homophone=self.enable_homophone)
     # 综合判断是否正确
     is_correct = (similarity > self.similarity_threshold) or (calculate > self.calculate_threshold) or homophone_match
+    previous_answer_matched = False
+    if is_group and match and group_id is not None:
+        previous_answer_matched = _is_recent_previous_match_answer(
+            self,
+            self.player.get(user_id, {}),
+            resolved_guess,
+        )
 
     logger.debug(
         f"[答题判断] 正确答案: {correct_name}, 用户回答: {resolved_guess}, 相似度: {similarity:.2f}, "
@@ -148,6 +187,10 @@ async def handle_fcc(
             # 取消当前题目的自动提示任务
             if group_id in self.match_next_task:
                 self._safe_cancel_task(self.match_next_task.pop(group_id, None))
+        elif previous_answer_matched:
+            logger.debug(
+                f"[fcc] Ignore stale correct answer in match group_id={group_id}, sender_id={sender_id}, guess={resolved_guess}"
+            )
         else:
             await self.match_repo.increment_participant_wrong(match.match_id, str(sender_id))
 
@@ -192,6 +235,10 @@ async def handle_fcc(
                     else:
                         next_bytes = await self.fc_init(group_id)
                         if next_bytes and next_bytes != "already_exists":
+                            next_player = self.player.get(group_id)
+                            if isinstance(next_player, dict):
+                                next_player["previous_answer"] = correct_name
+                                next_player["previous_answer_switched_at"] = time.time()
                             self.match_question_state[group_id] = time.time()
                             self._schedule_match_hint(group_id)
                             responses.append(
@@ -204,6 +251,12 @@ async def handle_fcc(
                             )
                         else:
                             responses.append(event.plain_result("下一题获取失败，请管理员使用 /ccl 比赛开始 重试"))
+    elif previous_answer_matched:
+        chain = [
+            Comp.At(qq=sender_id),
+            Comp.Plain(" 这条回答命中了上一题答案，但比赛已经切到下一题，本次记为无效回答。"),
+        ]
+        responses.append(event.chain_result(chain))
     else:
         chain = [
             Comp.At(qq=sender_id),
