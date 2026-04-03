@@ -19,8 +19,8 @@ async def handle_match_help(self, event: AstrMessageEvent) -> AsyncIterator[Any]
         """比赛模式指令帮助
 /ccl 比赛创建 [名称] [题目限制] [时间限制(分钟)] - 创建比赛(仅管理员)
 /ccl 比赛开始 - 开始比赛(仅管理员)
-/ccl 比赛结束/结束比赛 - 结束比赛(仅管理员)
-/ccl 比赛排行/排行 - 查看比赛排行榜"""
+/ccl 比赛结束 - 结束比赛(仅管理员)
+/ccl 比赛排行 - 查看比赛排行榜"""
     )
 
 
