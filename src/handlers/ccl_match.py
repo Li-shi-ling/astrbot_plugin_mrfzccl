@@ -128,7 +128,7 @@ def build_match_start_response(
         return event.chain_result(
             [
                 Comp.Plain(
-                    "🏁 比赛已开始！答题即为参与比赛\n干员立绘，请使用 fcc [干员名称] 进行猜测"
+                    "🏁 比赛已开始！答题即为参与比赛\n干员立绘，请使用 /fcc [干员名称] 进行猜测"
                 ),
                 Comp.Image.fromBytes(result),
             ]
