@@ -32,6 +32,7 @@ import time
 import os
 import re
 
+
 # 注册插件，指定插件名、作者、描述和版本号
 @register("mrfzccl", "Lishining", "你知道的,我一直是明日方舟高手", "1.0.0")
 class Mrfzccl(Star):
@@ -77,12 +78,24 @@ class Mrfzccl(Star):
         self.daily_counter: dict = {}  # 记录每日计数器
 
         # 比赛状态追踪
-        self.match_question_state: dict[str, float] = {}  # group_id -> 当前题目开始时间戳
-        self.match_next_task: dict[str, asyncio.Task] = {}  # group_id -> 当前题目的自动提示任务
-        self.match_loop_task: dict[str, asyncio.Task] = {}  # group_id -> 比赛结束检测循环任务
-        self.match_sessions: dict[str, str] = {}  # group_id -> unified_msg_origin（用于主动消息）
-        self.match_locks: dict[str, asyncio.Lock] = {}  # room_id(group_id/私聊user_id) -> 锁，防止并发触发导致状态错乱
-        self._room_lock_last_used: dict[str, float] = {}  # room_id -> 最近一次使用时间戳（用于清理长期闲置锁）
+        self.match_question_state: dict[
+            str, float
+        ] = {}  # group_id -> 当前题目开始时间戳
+        self.match_next_task: dict[
+            str, asyncio.Task
+        ] = {}  # group_id -> 当前题目的自动提示任务
+        self.match_loop_task: dict[
+            str, asyncio.Task
+        ] = {}  # group_id -> 比赛结束检测循环任务
+        self.match_sessions: dict[
+            str, str
+        ] = {}  # group_id -> unified_msg_origin（用于主动消息）
+        self.match_locks: dict[
+            str, asyncio.Lock
+        ] = {}  # room_id(group_id/私聊user_id) -> 锁，防止并发触发导致状态错乱
+        self._room_lock_last_used: dict[
+            str, float
+        ] = {}  # room_id -> 最近一次使用时间戳（用于清理长期闲置锁）
 
         # 防重复配置
         self.recent_characters: list = []  # 最近出现的干员列表
@@ -93,19 +106,29 @@ class Mrfzccl(Star):
         self._load_aliases()  # 加载别名配置
 
         # 低权重干员配置（出现概率较低的干员）
-        self.low_weight_keywords = self.Config.get("low_weight_characters", "预备干员,机师,W,SideStory").split(",")
-        self.low_weight_ratio = self.Config.get("low_weight_ratio", 0.2)  # 低权重干员出现概率
+        self.low_weight_keywords = self.Config.get(
+            "low_weight_characters", "预备干员,机师,W,SideStory"
+        ).split(",")
+        self.low_weight_ratio = self.Config.get(
+            "low_weight_ratio", 0.2
+        )  # 低权重干员出现概率
 
         # 比赛相关配置
-        self.match_question_limit = self.Config.get("match_question_limit", 0)  # 比赛题目数量限制
+        self.match_question_limit = self.Config.get(
+            "match_question_limit", 0
+        )  # 比赛题目数量限制
         self.match_time_limit = self.Config.get("match_time_limit", 0)  # 比赛时间限制
-        self.match_hint_delay = self.Config.get("match_hint_delay", 0)  # 比赛超时自动提示（秒，0关闭）
+        self.match_hint_delay = self.Config.get(
+            "match_hint_delay", 0
+        )  # 比赛超时自动提示（秒，0关闭）
         self.admin_ids = self.Config.get("admin_ids", [])  # 管理员ID列表
 
         # 设置默认配置
         self.target_size = self.Config.get("target_size", 128)  # 图片目标尺寸
         self.easy_probability = self.Config.get("easy_probability", 0.6)  # 简单难度概率
-        self.medium_probability = self.Config.get("medium_probability", 0.3)  # 中等难度概率
+        self.medium_probability = self.Config.get(
+            "medium_probability", 0.3
+        )  # 中等难度概率
         self.hard_probability = self.Config.get("hard_probability", 0.1)  # 困难难度概率
 
         # 添加 HTTP 会话管理
@@ -124,9 +147,7 @@ class Mrfzccl(Star):
         logger.debug(f"[Mrfzccl] 数据库目录: {self.db_path}")
 
         # 初始化数据库管理器
-        self.db = DBManager(
-            db_path=self.db_path
-        )
+        self.db = DBManager(db_path=self.db_path)
         # 初始化用户问答仓库
         self.user_qna_repo = UserQnARepo(self.db)
 
@@ -139,7 +160,9 @@ class Mrfzccl(Star):
 
         # 初始化问答统计渲染器
         renderer_theme = self.Config.get("renderer_theme", "light")
-        self.renderer = QnAStatsRenderer(output_dir=str(self.img_tmp_path), theme=renderer_theme)
+        self.renderer = QnAStatsRenderer(
+            output_dir=str(self.img_tmp_path), theme=renderer_theme
+        )
         logger.info(f"[Mrfzccl] 渲染主题: {renderer_theme}")
 
         # 构建数据文件路径
@@ -192,16 +215,18 @@ class Mrfzccl(Star):
         """开始游戏 /fc"""
         # 检查数据是否加载成功
         if not self.is_load:
-            yield event.chain_result([
-                Comp.At(qq=event.get_sender_id()),  # @发送者
-                Comp.Plain(" 插件未加载成功，请联系管理员配置数据文件")
-            ])
+            yield event.chain_result(
+                [
+                    Comp.At(qq=event.get_sender_id()),  # @发送者
+                    Comp.Plain(" 插件未加载成功，请联系管理员配置数据文件"),
+                ]
+            )
             return
 
         # 获取用户ID和群组ID（比赛仅在群聊有效）
         group_id_raw = event.get_group_id()
         sender_id = str(event.get_sender_id())
-        is_group = group_id_raw is not None
+        is_group = bool(group_id_raw)
         group_id = str(group_id_raw) if is_group else None
         user_id = group_id if is_group else sender_id
 
@@ -227,7 +252,7 @@ class Mrfzccl(Star):
         # 获取群组ID
         group_id_raw = event.get_group_id()
         sender_id = str(event.get_sender_id())
-        is_group = group_id_raw is not None
+        is_group = bool(group_id_raw)
         group_id = str(group_id_raw) if is_group else None
         user_id = group_id if is_group else sender_id
 
@@ -246,7 +271,9 @@ class Mrfzccl(Star):
             yield r
 
         if match_end_payload:
-            async for result in fc_handlers.iter_match_end_leaderboard(self, event, match_end_payload):
+            async for result in fc_handlers.iter_match_end_leaderboard(
+                self, event, match_end_payload
+            ):
                 yield result
 
     # 强制结束游戏命令
@@ -255,7 +282,7 @@ class Mrfzccl(Star):
         """强置结束游戏 /fce"""
         group_id_raw = event.get_group_id()
         sender_id = str(event.get_sender_id())
-        is_group = group_id_raw is not None
+        is_group = bool(group_id_raw)
         group_id = str(group_id_raw) if is_group else None
         user_id = group_id if is_group else sender_id
 
@@ -388,9 +415,13 @@ class Mrfzccl(Star):
 
     # 获取个人信息获取命令
     @ccl.command("名片")
-    async def user_profile_retrieval(self, event: AstrMessageEvent, user_id: str | None = None):
+    async def user_profile_retrieval(
+        self, event: AstrMessageEvent, user_id: str | None = None
+    ):
         """获取个人信息获取 /ccl 名片 [user_id] (如果user_id为空默认为发送人)"""
-        async for r in ccl_leaderboard.handle_user_profile_retrieval(self, event, user_id=user_id):
+        async for r in ccl_leaderboard.handle_user_profile_retrieval(
+            self, event, user_id=user_id
+        ):
             yield r
 
     # ========== 比赛相关函数 ==========
@@ -403,7 +434,13 @@ class Mrfzccl(Star):
 
     # 创建比赛命令
     @ccl.command("比赛创建")
-    async def match_create(self, event: AstrMessageEvent, name: str = "", question_limit: int = 0, time_limit: int = 0):
+    async def match_create(
+        self,
+        event: AstrMessageEvent,
+        name: str = "",
+        question_limit: int = 0,
+        time_limit: int = 0,
+    ):
         """创建比赛（仅管理员）用法: /ccl 比赛创建 [名称] [题目限制] [时间限制(分钟)]
         例如: /ccl 比赛创建 春节赛 20 30 表示创建名称为"春节赛"、答完20题自动结束、最多30分钟的比赛
         题目限制填0表示不限制，时间限制填0表示不限制。比赛开始后，参与答题的用户自动成为参赛者"""
@@ -433,7 +470,9 @@ class Mrfzccl(Star):
         yield ccl_match.build_match_start_response(event, result)
 
         # 创建比赛循环任务，用于检查结束条件
-        self.match_loop_task[group_id] = asyncio.create_task(self._match_game_loop(group_id))
+        self.match_loop_task[group_id] = asyncio.create_task(
+            self._match_game_loop(group_id)
+        )
 
     # 结束比赛命令
     @ccl.command("比赛结束")
@@ -447,13 +486,17 @@ class Mrfzccl(Star):
 
         room_lock = self._get_match_lock(group_id)
         async with room_lock:
-            ended, match_name, top_participants = await ccl_match.match_end_inlock(self, group_id)
+            ended, match_name, top_participants = await ccl_match.match_end_inlock(
+                self, group_id
+            )
 
         if not ended:
             yield event.plain_result("❌ 当前没有进行中的比赛")
             return
 
-        async for r in ccl_match.iter_match_end_results(self, event, match_name, top_participants):
+        async for r in ccl_match.iter_match_end_results(
+            self, event, match_name, top_participants
+        ):
             yield r
 
     # 比赛排行榜命令
@@ -467,14 +510,20 @@ class Mrfzccl(Star):
     @ccl.command("清除数据")
     async def reset_user_data(self, event: AstrMessageEvent, target_user_id: str = ""):
         """清除用户答题数据（仅管理员）/ccl 清除数据 [user_id]"""
-        async for r in ccl_admin.handle_reset_user_data(self, event, target_user_id=target_user_id):
+        async for r in ccl_admin.handle_reset_user_data(
+            self, event, target_user_id=target_user_id
+        ):
             yield r
 
     # 清除用户荣誉命令
     @ccl.command("清除荣誉")
-    async def reset_user_honors_cmd(self, event: AstrMessageEvent, target_user_id: str = ""):
+    async def reset_user_honors_cmd(
+        self, event: AstrMessageEvent, target_user_id: str = ""
+    ):
         """清除用户荣誉数据（仅管理员）/ccl 清除荣誉 [user_id]"""
-        async for r in ccl_admin.handle_reset_user_honors_cmd(self, event, target_user_id=target_user_id):
+        async for r in ccl_admin.handle_reset_user_honors_cmd(
+            self, event, target_user_id=target_user_id
+        ):
             yield r
 
     # 清除所有用户数据命令
@@ -493,7 +542,14 @@ class Mrfzccl(Star):
 
     # 授予用户荣誉命令
     @ccl.command("授予荣誉")
-    async def grant_honor_cmd(self, event: AstrMessageEvent, target_user_id: str = "", rank: int = 1, match_name: str = "", correct_count: int = 0):
+    async def grant_honor_cmd(
+        self,
+        event: AstrMessageEvent,
+        target_user_id: str = "",
+        rank: int = 1,
+        match_name: str = "",
+        correct_count: int = 0,
+    ):
         """授予用户特定荣誉（仅管理员）/ccl 授予荣誉 [user_id] [名次] [比赛名称] [答对数量]
         例如: /ccl 授予荣誉 123456 1 测试赛 10"""
         async for r in ccl_admin.handle_grant_honor_cmd(
@@ -515,17 +571,13 @@ class Mrfzccl(Star):
                 loop = asyncio.get_running_loop()
                 # 调整图片大小
                 resized_original = await loop.run_in_executor(
-                    None,
-                    self.resize_to_target,
-                    original_image,
-                    self.target_size
+                    None, self.resize_to_target, original_image, self.target_size
                 )
                 # 将图片转换为字节流
                 img_bytes = self.pil_image_to_bytes(resized_original)
-                output_data = event.chain_result([
-                    Comp.Plain("正确答案的完整立绘:"),
-                    Comp.Image.fromBytes(img_bytes)
-                ])
+                output_data = event.chain_result(
+                    [Comp.Plain("正确答案的完整立绘:"), Comp.Image.fromBytes(img_bytes)]
+                )
                 self.end_game(user_id)  # 结束游戏
                 return output_data
             except Exception as e:
@@ -657,7 +709,9 @@ class Mrfzccl(Star):
         if q_limit > 0:
             participants = await self.match_repo.get_participants(match.match_id)
             try:
-                solved = sum(int(getattr(p, "correct_count", 0) or 0) for p in participants)
+                solved = sum(
+                    int(getattr(p, "correct_count", 0) or 0) for p in participants
+                )
             except Exception:
                 solved = 0
             if solved >= q_limit:
@@ -666,7 +720,9 @@ class Mrfzccl(Star):
         return None
 
     # 结束比赛并收集前十名参赛者
-    async def _end_match_and_collect_top(self, group_id: str, match) -> tuple[str, int, list]:
+    async def _end_match_and_collect_top(
+        self, group_id: str, match
+    ) -> tuple[str, int, list]:
         """结束比赛 + 清理运行态 + 返回 Top10 参赛者（已按得分排序），并保存荣誉。"""
         match_name = getattr(match, "match_name", "比赛")
         match_id = int(getattr(match, "match_id", 0) or 0)
@@ -680,8 +736,13 @@ class Mrfzccl(Star):
 
         for i, p in enumerate(top_participants, 1):
             await self.match_repo.save_honor(
-                p.user_id, match_id, match_name, i,
-                p.correct_count, p.wrong_count, p.score
+                p.user_id,
+                match_id,
+                match_name,
+                i,
+                p.correct_count,
+                p.wrong_count,
+                p.score,
             )
 
         return match_name, match_id, top_participants
@@ -703,12 +764,25 @@ class Mrfzccl(Star):
             char_data = self.data.get(name, {}) if name else {}
 
             if key == "职业及分支":
-                value = char_data.get("职业及分支", char_data.get("职业分支", "该干员没有该属性"))
+                value = char_data.get(
+                    "职业及分支", char_data.get("职业分支", "该干员没有该属性")
+                )
             elif fctn == 1:
-                star_map = {"1": "一星", "2": "二星", "3": "三星", "4": "四星", "5": "五星", "6": "六星"}
-                value = star_map.get(str(char_data.get("星级", "")), char_data.get("星级", ""))
+                star_map = {
+                    "1": "一星",
+                    "2": "二星",
+                    "3": "三星",
+                    "4": "四星",
+                    "5": "五星",
+                    "6": "六星",
+                }
+                value = star_map.get(
+                    str(char_data.get("星级", "")), char_data.get("星级", "")
+                )
             elif key == "阵营":
-                value = char_data.get("阵营", char_data.get("所属阵营", "该干员没有该属性"))
+                value = char_data.get(
+                    "阵营", char_data.get("所属阵营", "该干员没有该属性")
+                )
             else:
                 value = char_data.get(key, "该干员没有该属性")
 
@@ -758,7 +832,9 @@ class Mrfzccl(Star):
         )
 
     # 延迟后执行自动提示的循环任务
-    async def _match_hint_after_delay(self, group_id: str, session: str, delay: int, token: float) -> None:
+    async def _match_hint_after_delay(
+        self, group_id: str, session: str, delay: int, token: float
+    ) -> None:
         try:
             interval = max(1, int(delay))
             while True:
@@ -790,7 +866,9 @@ class Mrfzccl(Star):
                         return
                     hint_text, has_more = self._next_hint_text_and_advance(group_id)
 
-                await self.context.send_message(session, MessageChain().message(f"💡 超时提示：{hint_text}"))
+                await self.context.send_message(
+                    session, MessageChain().message(f"💡 超时提示：{hint_text}")
+                )
                 if not has_more:
                     return
 
@@ -801,7 +879,9 @@ class Mrfzccl(Star):
 
     # 加载别名映射
     def _load_aliases(self):
-        alias_str = self.Config.get("character_aliases", "钛铱:白金,宫羽:澄闪,小刻:刻俄柏,小羊:艾雅法拉")
+        alias_str = self.Config.get(
+            "character_aliases", "钛铱:白金,宫羽:澄闪,小刻:刻俄柏,小羊:艾雅法拉"
+        )
         self.alias_map = parse_aliases(alias_str)
 
     # 初始化游戏，返回临时文件路径
@@ -848,17 +928,11 @@ class Mrfzccl(Star):
 
             # 生成遮罩图片
             result, _ = await loop.run_in_executor(
-                None,
-                self.mask_image_with_random_blocks,
-                image,
-                block_count
+                None, self.mask_image_with_random_blocks, image, block_count
             )
             # 调整图片大小
             resized = await loop.run_in_executor(
-                None,
-                self.resize_to_target,
-                result,
-                self.target_size
+                None, self.resize_to_target, result, self.target_size
             )
             # 转换为字节流
             img_bytes = self.pil_image_to_bytes(resized)
@@ -881,7 +955,11 @@ class Mrfzccl(Star):
             cache_data_id = getattr(self, "_question_cache_data_id", None)
             cache_kw_sig = getattr(self, "_question_cache_kw_sig", None)
             data_id = id(self.data)
-            kw_sig = tuple(kw for kw in (self.low_weight_keywords or []) if isinstance(kw, str) and kw)
+            kw_sig = tuple(
+                kw
+                for kw in (self.low_weight_keywords or [])
+                if isinstance(kw, str) and kw
+            )
 
             if (
                 cache_data_id != data_id
@@ -889,6 +967,7 @@ class Mrfzccl(Star):
                 or not hasattr(self, "_question_candidate_names")
                 or not hasattr(self, "_question_candidate_urls")
             ):
+
                 def is_blocked_ip(hostname: Optional[str]) -> bool:
                     if not hostname:
                         return True
@@ -937,7 +1016,9 @@ class Mrfzccl(Star):
                     is_low_weight.append(any(kw in name for kw in low_keywords))
 
                 if not candidate_names:
-                    logger.error("[extract_questions] 无可用题库（请检查 original_url 配置）")
+                    logger.error(
+                        "[extract_questions] 无可用题库（请检查 original_url 配置）"
+                    )
                     return None
 
                 self._question_candidate_names = np.array(candidate_names, dtype=object)
@@ -955,8 +1036,12 @@ class Mrfzccl(Star):
                 self._question_rng = rng
 
             names_arr = self._question_candidate_names
-            low_idx = getattr(self, "_question_candidate_low_idx", np.array([], dtype=int))
-            normal_idx = getattr(self, "_question_candidate_normal_idx", np.array([], dtype=int))
+            low_idx = getattr(
+                self, "_question_candidate_low_idx", np.array([], dtype=int)
+            )
+            normal_idx = getattr(
+                self, "_question_candidate_normal_idx", np.array([], dtype=int)
+            )
 
             recent_set = set(self.recent_characters or [])
             # 如果候选数量小于 recent 记录，会导致无法抽到新题：直接清空
@@ -971,8 +1056,12 @@ class Mrfzccl(Star):
                 low_prob = 0.0
             low_prob = max(0.0, min(1.0, low_prob))
 
-            use_low = low_idx.size > 0 and normal_idx.size > 0 and rng.random() < low_prob
-            primary_pool = low_idx if use_low else (normal_idx if normal_idx.size > 0 else low_idx)
+            use_low = (
+                low_idx.size > 0 and normal_idx.size > 0 and rng.random() < low_prob
+            )
+            primary_pool = (
+                low_idx if use_low else (normal_idx if normal_idx.size > 0 else low_idx)
+            )
             secondary_pool = normal_idx if primary_pool is low_idx else low_idx
             if primary_pool.size == 0:
                 primary_pool = np.arange(len(names_arr), dtype=int)
@@ -1028,7 +1117,9 @@ class Mrfzccl(Star):
         return os.path.abspath(path)
 
     # 从URL异步获取图片
-    async def get_image_from_url(self, url: str, timeout: int = 10) -> Optional[Image.Image]:
+    async def get_image_from_url(
+        self, url: str, timeout: int = 10
+    ) -> Optional[Image.Image]:
         try:
             # 检查URL协议
             if not url.startswith(("http://", "https://")):
@@ -1051,8 +1142,8 @@ class Mrfzccl(Star):
             # 获取HTTP会话
             session = await self._get_session()
             async with session.get(
-                    url,
-                    ssl=False  # 忽略SSL证书验证
+                url,
+                ssl=False,  # 忽略SSL证书验证
             ) as response:
                 if response.status != 200:
                     raise Exception(f"HTTP {response.status}: {response.reason}")
@@ -1067,9 +1158,7 @@ class Mrfzccl(Star):
                 # 在线程池中加载图片
                 loop = asyncio.get_running_loop()
                 image = await loop.run_in_executor(
-                    None,
-                    self._load_image_from_bytes,
-                    content
+                    None, self._load_image_from_bytes, content
                 )
                 return image
         except (aiohttp.ClientError, ValueError) as e:
@@ -1083,7 +1172,7 @@ class Mrfzccl(Star):
     def _load_image_from_bytes(self, content: bytes) -> Image.Image:
         image = Image.open(BytesIO(content))
         # 检查图片格式
-        if image.format not in ['JPEG', 'PNG', 'GIF', 'WEBP', 'BMP']:
+        if image.format not in ["JPEG", "PNG", "GIF", "WEBP", "BMP"]:
             raise Exception(f"不支持的图片格式: {image.format}")
         image.load()
 
@@ -1098,13 +1187,13 @@ class Mrfzccl(Star):
         if not text or not keyword:
             return ""
         # 使用正则表达式提取关键词后的内容
-        pattern = rf'{re.escape(keyword)}\s*(.*)'
+        pattern = rf"{re.escape(keyword)}\s*(.*)"
         match = re.search(pattern, text)
         if not match:
             return ""
         user_input = match.group(1).strip()
         # 清理特殊字符
-        cleaned = re.sub(r'[^\u4e00-\u9fa5a-zA-Z0-9\s]', '', user_input)
+        cleaned = re.sub(r"[^\u4e00-\u9fa5a-zA-Z0-9\s]", "", user_input)
         # 限制长度
         if len(cleaned) > 50:
             cleaned = cleaned[:50]
@@ -1112,16 +1201,16 @@ class Mrfzccl(Star):
 
     # 遮挡图生成
     def mask_image_with_random_blocks(
-            self,
-            image: Image.Image,
-            block_count: int = 5,
-            mask_color: Tuple[int, int, int] = (0, 0, 0),
-            min_width_percent: int = 10,
-            max_width_percent: int = 20,
-            min_height_percent: int = 10,
-            max_height_percent: int = 20,
-            min_gap_percent: int = 2,
-            avoid_edges: bool = True
+        self,
+        image: Image.Image,
+        block_count: int = 5,
+        mask_color: Tuple[int, int, int] = (0, 0, 0),
+        min_width_percent: int = 10,
+        max_width_percent: int = 20,
+        min_height_percent: int = 10,
+        max_height_percent: int = 20,
+        min_gap_percent: int = 2,
+        avoid_edges: bool = True,
     ) -> Tuple[Image.Image, List[Tuple[int, int, int, int]]]:
         """
         高性能遮罩图片，只露出几个小方块，保持原始游戏逻辑
@@ -1138,8 +1227,8 @@ class Mrfzccl(Star):
             Tuple[遮罩后的图片, 方块坐标列表]
         """
         # 转换为RGBA模式（如果不是）
-        if image.mode != 'RGBA':
-            original_rgba = image.convert('RGBA')
+        if image.mode != "RGBA":
+            original_rgba = image.convert("RGBA")
         else:
             original_rgba = image.copy()
 
@@ -1182,8 +1271,12 @@ class Mrfzccl(Star):
                 # 检查是否与已有方块冲突
                 conflict = False
                 for bx1, by1, bx2, by2 in blocks:
-                    if not (x2 + min_gap < bx1 or x1 > bx2 + min_gap or
-                            y2 + min_gap < by1 or y1 > by2 + min_gap):
+                    if not (
+                        x2 + min_gap < bx1
+                        or x1 > bx2 + min_gap
+                        or y2 + min_gap < by1
+                        or y1 > by2 + min_gap
+                    ):
                         conflict = True
                         break
 
@@ -1196,7 +1289,7 @@ class Mrfzccl(Star):
         alpha = mask_layer[..., 3:4] / 255.0
         result_arr = arr * (1 - alpha) + mask_layer * alpha
         result_arr = result_arr.astype(np.uint8)
-        result = Image.fromarray(result_arr, 'RGBA')
+        result = Image.fromarray(result_arr, "RGBA")
         return result, blocks
 
     # 按比例缩放图像，保持宽高比
@@ -1242,7 +1335,9 @@ class Mrfzccl(Star):
             )
             if image_path and os.path.exists(image_path):
                 try:
-                    await self.context.send_message(session, MessageChain().file_image(image_path))
+                    await self.context.send_message(
+                        session, MessageChain().file_image(image_path)
+                    )
                     return
                 except Exception as e:
                     logger.warning(f"[match] 主动发送排行榜图片失败，回退文本: {e}")
@@ -1283,18 +1378,28 @@ class Mrfzccl(Star):
 
                 session = self.match_sessions.get(group_id)
                 if end_reason == "time_limit":
-                    reason_text = f"⏱️ 已达到时间限制，比赛「{match2.match_name}」自动结束！"
+                    reason_text = (
+                        f"⏱️ 已达到时间限制，比赛「{match2.match_name}」自动结束！"
+                    )
                 else:
-                    reason_text = f"📝 已达到题目上限，比赛「{match2.match_name}」自动结束！"
+                    reason_text = (
+                        f"📝 已达到题目上限，比赛「{match2.match_name}」自动结束！"
+                    )
 
-                match_name, _, top_participants = await self._end_match_and_collect_top(group_id, match2)
+                match_name, _, top_participants = await self._end_match_and_collect_top(
+                    group_id, match2
+                )
 
                 if not session:
-                    logger.warning(f"[match] 缺少 session，无法主动发送比赛结束消息 group_id={group_id}")
+                    logger.warning(
+                        f"[match] 缺少 session，无法主动发送比赛结束消息 group_id={group_id}"
+                    )
                     return
 
             try:
-                await self.context.send_message(session, MessageChain().message(reason_text))
+                await self.context.send_message(
+                    session, MessageChain().message(reason_text)
+                )
                 await self._send_match_leaderboard_to_session(
                     session=session,
                     match_name=match_name,
@@ -1302,7 +1407,9 @@ class Mrfzccl(Star):
                     title=f"比赛「{match_name}」已结束排行榜",
                 )
             except Exception as e:
-                logger.warning(f"[match] 主动发送比赛结束消息失败 group_id={group_id}: {e}")
+                logger.warning(
+                    f"[match] 主动发送比赛结束消息失败 group_id={group_id}: {e}"
+                )
             return
 
     # 插件初始化时
@@ -1401,13 +1508,15 @@ class Mrfzccl(Star):
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
             timeout = aiohttp.ClientTimeout(total=10)
-            connector = aiohttp.TCPConnector(limit=10, limit_per_host=5)  # 限制连接池大小
+            connector = aiohttp.TCPConnector(
+                limit=10, limit_per_host=5
+            )  # 限制连接池大小
             self._session = aiohttp.ClientSession(
                 timeout=timeout,
                 connector=connector,
                 headers={
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-                }
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                },
             )
             logger.debug("[Mrfzccl] 创建新的HTTP会话")
         return self._session

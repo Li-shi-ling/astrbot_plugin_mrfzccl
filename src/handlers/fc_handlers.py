@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import time
 import traceback
+from collections.abc import AsyncIterator
 from difflib import SequenceMatcher
-from typing import Any, AsyncIterator
+from typing import Any
 
 import astrbot.api.message_components as Comp
 from astrbot.api import logger
@@ -19,11 +20,16 @@ from ..tool import (
     resolve_alias,
 )
 
+
 # 判断是否为正确答案
-def _get_answer_match_details(self, answer: str, guess: str) -> tuple[float, float, bool, bool]:
+def _get_answer_match_details(
+    self, answer: str, guess: str
+) -> tuple[float, float, bool, bool]:
     similarity = SequenceMatcher(None, answer, guess).ratio()
     coverage = calculate_char_coverage_set(answer, guess)
-    homophone_match = check_homophone(answer, guess, enable_homophone=self.enable_homophone)
+    homophone_match = check_homophone(
+        answer, guess, enable_homophone=self.enable_homophone
+    )
     is_correct = (
         similarity > self.similarity_threshold
         or coverage > self.calculate_threshold
@@ -36,14 +42,19 @@ def _is_matching_answer(self, answer: str, guess: str) -> bool:
     _, _, _, is_correct = _get_answer_match_details(self, answer, guess)
     return is_correct
 
+
 # 判断是否为上一个题目的答题
-def _is_recent_previous_match_answer(self, player_state: dict[str, Any], guess: str) -> bool:
+def _is_recent_previous_match_answer(
+    self, player_state: dict[str, Any], guess: str
+) -> bool:
     previous_answer = player_state.get("previous_answer")
     switched_at = player_state.get("previous_answer_switched_at")
     if not previous_answer or switched_at is None:
         return False
 
-    grace_period = max(0.0, float(getattr(self, "match_answer_grace_period", 3.0) or 0.0))
+    grace_period = max(
+        0.0, float(getattr(self, "match_answer_grace_period", 3.0) or 0.0)
+    )
     if grace_period <= 0:
         return False
 
@@ -56,6 +67,7 @@ def _is_recent_previous_match_answer(self, player_state: dict[str, Any], guess: 
         return False
 
     return _is_matching_answer(self, str(previous_answer), guess)
+
 
 async def handle_fc(
     self,
@@ -88,8 +100,12 @@ async def handle_fc(
         # 非管理员进行次数检测
         if self.admin_ids and sender_id not in [str(x) for x in self.admin_ids]:
             # 非比赛模式下检查每日限制
-            if not match and not check_daily_limit(sender_id, self.daily_counter, self.daily_limit):
-                response = event.plain_result(f"今日游戏次数已达上限({self.daily_limit}次)，请明天再来！")
+            if not match and not check_daily_limit(
+                sender_id, self.daily_counter, self.daily_limit
+            ):
+                response = event.plain_result(
+                    f"今日游戏次数已达上限({self.daily_limit}次)，请明天再来！"
+                )
 
     if response is None:
         try:
@@ -114,6 +130,7 @@ async def handle_fc(
 
     return response
 
+
 async def handle_fcc(
     self,
     event: AstrMessageEvent,
@@ -125,7 +142,23 @@ async def handle_fcc(
 ) -> tuple[list[Any], tuple[str, list] | None]:
     """Core logic for `/fcc` (expects room lock is held by caller)."""
     responses: list[Any] = []
-    match_end_payload: tuple[str, list] | None = None  # (ended_match_name, ended_top_participants)
+    match_end_payload: tuple[str, list] | None = (
+        None  # (ended_match_name, ended_top_participants)
+    )
+
+    # 确保数据库初始化
+    try:
+        await self.db.init_db()
+        logger.info("[Mrfzccl] 数据库初始化完成")
+    except Exception as e:
+        logger.error(f"[Mrfzccl] 数据库初始化失败: {e}")
+        response = event.chain_result(
+            [
+                Comp.At(qq=sender_id),
+                Comp.Plain(" 数据库初始化失败，请联系管理员"),
+            ]
+        )
+        return responses, match_end_payload
 
     logger.debug(
         f"[fcc] user_id={user_id}, player_keys={list(self.player.keys())}, has_active={has_active_game(self.player, user_id)}"
@@ -186,9 +219,13 @@ async def handle_fcc(
     # 如果是比赛模式，更新比赛数据
     if is_group and match and group_id is not None:
         self.match_sessions[group_id] = event.unified_msg_origin
-        await self.match_repo.add_participant(match.match_id, str(sender_id), sender_name)
+        await self.match_repo.add_participant(
+            match.match_id, str(sender_id), sender_name
+        )
         if is_correct:
-            await self.match_repo.increment_participant_score(match.match_id, str(sender_id))
+            await self.match_repo.increment_participant_score(
+                match.match_id, str(sender_id)
+            )
             # 取消当前题目的自动提示任务
             if group_id in self.match_next_task:
                 self._safe_cancel_task(self.match_next_task.pop(group_id, None))
@@ -197,7 +234,9 @@ async def handle_fcc(
                 f"[fcc] Ignore stale correct answer in match group_id={group_id}, sender_id={sender_id}, guess={resolved_guess}"
             )
         else:
-            await self.match_repo.increment_participant_wrong(match.match_id, str(sender_id))
+            await self.match_repo.increment_participant_wrong(
+                match.match_id, str(sender_id)
+            )
 
     # 处理回答结果
     if is_correct:
@@ -224,17 +263,25 @@ async def handle_fcc(
                 if not (existing and existing.get("status") in {"active", "loading"}):
                     end_reason = await self._get_match_end_reason(match_now)
                     if end_reason:
-                        ended_match_name, _, ended_top_participants = await self._end_match_and_collect_top(
+                        (
+                            ended_match_name,
+                            _,
+                            ended_top_participants,
+                        ) = await self._end_match_and_collect_top(
                             group_id,
                             match_now,
                         )
                         if end_reason == "time_limit":
                             responses.append(
-                                event.plain_result(f"⏱️ 已达到时间限制，比赛「{ended_match_name}」自动结束！")
+                                event.plain_result(
+                                    f"⏱️ 已达到时间限制，比赛「{ended_match_name}」自动结束！"
+                                )
                             )
                         else:
                             responses.append(
-                                event.plain_result(f"📝 已达到题目上限，比赛「{ended_match_name}」自动结束！")
+                                event.plain_result(
+                                    f"📝 已达到题目上限，比赛「{ended_match_name}」自动结束！"
+                                )
                             )
                         match_end_payload = (ended_match_name, ended_top_participants)
                     else:
@@ -249,17 +296,25 @@ async def handle_fcc(
                             responses.append(
                                 event.chain_result(
                                     [
-                                        Comp.Plain("下一题来啦！\n干员立绘,请使用/fcc [干员名称] 进行猜测"),
+                                        Comp.Plain(
+                                            "下一题来啦！\n干员立绘,请使用/fcc [干员名称] 进行猜测"
+                                        ),
                                         Comp.Image.fromBytes(next_bytes),
                                     ]
                                 )
                             )
                         else:
-                            responses.append(event.plain_result("下一题获取失败，请管理员使用 /ccl 比赛开始 重试"))
+                            responses.append(
+                                event.plain_result(
+                                    "下一题获取失败，请管理员使用 /ccl 比赛开始 重试"
+                                )
+                            )
     elif previous_answer_matched:
         chain = [
             Comp.At(qq=sender_id),
-            Comp.Plain(" 这条回答命中了上一题答案，但比赛已经切到下一题，本次记为无效回答。"),
+            Comp.Plain(
+                " 这条回答命中了上一题答案，但比赛已经切到下一题，本次记为无效回答。"
+            ),
         ]
         responses.append(event.chain_result(chain))
     else:
@@ -275,6 +330,7 @@ async def handle_fcc(
         )
 
     return responses, match_end_payload
+
 
 async def iter_match_end_leaderboard(
     self,
@@ -297,6 +353,7 @@ async def iter_match_end_leaderboard(
         ),
     ):
         yield result
+
 
 async def handle_fce(
     self,
@@ -326,6 +383,7 @@ async def handle_fce(
         responses.append(await self.send_original_image(user_id, event))  # 发送原图
 
     return responses
+
 
 async def handle_fct(
     self,
@@ -357,6 +415,7 @@ async def handle_fct(
 
     return response
 
+
 async def handle_fcw(
     self,
     event: AstrMessageEvent,
@@ -378,13 +437,24 @@ async def handle_fcw(
     else:
         char_data = self.data.get(self.player[user_id]["name"], {})
 
-        logger.info(f"[fcw] player={self.player[user_id]}, char_data keys={list(char_data.keys()) if char_data else 'None'}")
+        logger.info(
+            f"[fcw] player={self.player[user_id]}, char_data keys={list(char_data.keys()) if char_data else 'None'}"
+        )
 
         # 获取职业及分支
-        profession = char_data.get("职业及分支", char_data.get("职业分支", "该干员没有该属性"))
+        profession = char_data.get(
+            "职业及分支", char_data.get("职业分支", "该干员没有该属性")
+        )
         # 星级转换为中文
         star = char_data.get("星级", "")
-        star_map = {"1": "一星", "2": "二星", "3": "三星", "4": "四星", "5": "五星", "6": "六星"}
+        star_map = {
+            "1": "一星",
+            "2": "二星",
+            "3": "三星",
+            "4": "四星",
+            "5": "五星",
+            "6": "六星",
+        }
         star_cn = star_map.get(str(star), star)
         # 阵营
         camp = char_data.get("阵营", char_data.get("所属阵营", "该干员没有该属性"))

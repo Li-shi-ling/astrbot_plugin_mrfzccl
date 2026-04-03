@@ -1,12 +1,25 @@
 from __future__ import annotations
 
 import time
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import Any
 
 import astrbot.api.message_components as Comp
+from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 
 from ..tool import generate_image_or_fallback, generate_match_leaderboard_text
+
+# 安全的执行查询方法
+async def ensure_match_db_ready(self, event: AstrMessageEvent) -> Any | None:
+    try:
+        await self.db.init_db()
+        logger.info("[Mrfzccl] 匹配命令的数据库初始化完成")
+        return None
+    except Exception as e:
+        logger.error(f"[Mrfzccl] 匹配命令的数据库初始化失败: {e}")
+        return event.plain_result("数据库初始化失败，请联系管理员。")
+
 
 async def handle_match_help(self, event: AstrMessageEvent) -> AsyncIterator[Any]:
     """比赛模式帮助"""
@@ -23,6 +36,7 @@ async def handle_match_help(self, event: AstrMessageEvent) -> AsyncIterator[Any]
 ━━━━━━━━━━━━━━"""
     )
 
+
 async def handle_match_create(
     self,
     event: AstrMessageEvent,
@@ -32,9 +46,15 @@ async def handle_match_create(
 ) -> AsyncIterator[Any]:
     """创建比赛（仅管理员）用法: /ccl 比赛创建 [名称] [题目限制] [时间限制(分钟)]"""
     group_id_raw = event.get_group_id()
-    if group_id_raw is None:
+    if not group_id_raw:
         yield event.plain_result("请在群聊使用")
         return
+
+    db_error = await ensure_match_db_ready(self, event)
+    if db_error is not None:
+        yield db_error
+        return
+
     group_id = str(group_id_raw)
     sender_id = str(event.get_sender_id())
 
@@ -54,7 +74,9 @@ async def handle_match_create(
     t_limit = time_limit if time_limit >= 0 else self.match_time_limit
 
     if q_limit < 0 or t_limit < 0:
-        yield event.plain_result(f"参数未通过检验,q_limit:{q_limit},t_limit:{t_limit}")
+        yield event.plain_result(
+            f"参数未通过检验: q_limit={q_limit}, t_limit={t_limit}"
+        )
         return
 
     # 创建比赛名称
@@ -63,19 +85,30 @@ async def handle_match_create(
     await self.match_repo.create_match(group_id, match_name, q_limit, t_limit)
 
     # 构建响应信息
-    info = f"✅ 比赛「{match_name}」已创建！"
+    info = [f"✅ 比赛「{match_name}」已创建！"]
     if q_limit > 0:
-        info += f"\n📝 题目限制: {q_limit}题"
+        info.append(f"📝 题目限制: {q_limit}题")
     if t_limit > 0:
-        info += f"\n⏱️ 时间限制: {t_limit}分钟"
-    info += "\n进行答题即可参与比赛"
-    yield event.plain_result(info)
+        info.append(f"⏱️ 时间限制: {t_limit}分钟")
+    info.append("进行答题即可参与比赛")
+    yield event.plain_result("\n".join(info))
 
-async def match_start_precheck(self, event: AstrMessageEvent) -> tuple[bool, str | None, Any | None]:
+
+async def match_start_precheck(
+    self, event: AstrMessageEvent
+) -> tuple[bool, str | None, Any | None]:
     """`/ccl 比赛开始` 的锁外校验与 DB 状态更新。"""
     group_id_raw = event.get_group_id()
-    if group_id_raw is None:
-        return False, None, event.plain_result("请在群聊使用")
+    if not group_id_raw:
+        return (
+            False,
+            None,
+            event.plain_result("请在群聊使用"),
+        )
+
+    db_error = await ensure_match_db_ready(self, event)
+    if db_error is not None:
+        return False, None, db_error
 
     sender_id = str(event.get_sender_id())
     group_id = str(group_id_raw)
@@ -83,17 +116,26 @@ async def match_start_precheck(self, event: AstrMessageEvent) -> tuple[bool, str
 
     # 检查管理员权限
     if self.admin_ids and sender_id not in [str(x) for x in self.admin_ids]:
-        return False, group_id, event.plain_result("❌ 只有管理员可以开始比赛")
+        return (
+            False,
+            group_id,
+            event.plain_result("❌ 只有管理员可以开始比赛"),
+        )
 
     # 获取活跃比赛
     match = await self.match_repo.get_active_match(group_id)
     if not match:
-        return False, group_id, event.plain_result("❌ 当前没有进行中的比赛")
+        return (
+            False,
+            group_id,
+            event.plain_result("❌ 当前没有进行中的比赛"),
+        )
 
     # 开始比赛
     await self.match_repo.start_match(match.match_id)
 
     return True, group_id, None
+
 
 async def match_start_inlock(self, group_id: str) -> bytes | str | None:
     """`/ccl 比赛开始` 的锁内状态清理 + 出题逻辑。"""
@@ -115,30 +157,53 @@ async def match_start_inlock(self, group_id: str) -> bytes | str | None:
 
     return result
 
-def build_match_start_response(event: AstrMessageEvent, result: bytes | str | None) -> Any:
+
+def build_match_start_response(
+    event: AstrMessageEvent, result: bytes | str | None
+) -> Any:
     if result and result != "already_exists":
         return event.chain_result(
             [
-                Comp.Plain("🏁 比赛已开始！答题即为参与比赛\n干员立绘,请使用/fcc [干员名称] 进行猜测"),
+                Comp.Plain(
+                    "🏁 比赛已开始！答题即为参与比赛\n干员立绘,请使用/fcc [干员名称] 进行猜测"
+                ),
                 Comp.Image.fromBytes(result),
             ]
         )
-    return event.plain_result("🏁 比赛已开始！第一题获取失败，请重试")
+    return event.plain_result(
+        "🏁 比赛已开始！第一题获取失败，请重试"
+    )
 
-async def match_end_precheck(self, event: AstrMessageEvent) -> tuple[bool, str | None, Any | None]:
+
+async def match_end_precheck(
+    self, event: AstrMessageEvent
+) -> tuple[bool, str | None, Any | None]:
     """`/ccl 比赛结束` 的锁外校验。"""
     group_id_raw = event.get_group_id()
-    if group_id_raw is None:
-        return False, None, event.plain_result("请在群聊使用")
+    if not group_id_raw:
+        return (
+            False,
+            None,
+            event.plain_result("请在群聊使用"),
+        )
+
+    db_error = await ensure_match_db_ready(self, event)
+    if db_error is not None:
+        return False, None, db_error
 
     sender_id = str(event.get_sender_id())
     group_id = str(group_id_raw)
 
     # 检查管理员权限
     if self.admin_ids and sender_id not in [str(x) for x in self.admin_ids]:
-        return False, group_id, event.plain_result("❌ 只有管理员可以结束比赛")
+        return (
+            False,
+            group_id,
+            event.plain_result("❌ 只有管理员可以结束比赛"),
+        )
 
     return True, group_id, None
+
 
 async def match_end_inlock(self, group_id: str) -> tuple[bool, str, list]:
     """`/ccl 比赛结束` 的锁内结算逻辑。"""
@@ -147,8 +212,11 @@ async def match_end_inlock(self, group_id: str) -> tuple[bool, str, list]:
     if not match_now or not match_now.is_active:
         return False, "", []
 
-    match_name, _, top_participants = await self._end_match_and_collect_top(group_id, match_now)
+    match_name, _, top_participants = await self._end_match_and_collect_top(
+        group_id, match_now
+    )
     return True, match_name, top_participants
+
 
 async def iter_match_end_results(
     self,
@@ -164,16 +232,25 @@ async def iter_match_end_results(
             top_participants,
             title=f"比赛「{match_name}」已结束排行榜",
         ),
-        generate_text_func=lambda: generate_match_leaderboard_text(match_name, top_participants, ended=True),
+        generate_text_func=lambda: generate_match_leaderboard_text(
+            match_name, top_participants, ended=True
+        ),
     ):
         yield result
+
 
 async def handle_match_leaderboard(self, event: AstrMessageEvent) -> AsyncIterator[Any]:
     """使用`/ccl 比赛排行`获取比赛排行榜"""
     group_id_raw = event.get_group_id()
-    if group_id_raw is None:
+    if not group_id_raw:
         yield event.plain_result("请在群聊使用")
         return
+
+    db_error = await ensure_match_db_ready(self, event)
+    if db_error is not None:
+        yield db_error
+        return
+
     group_id = str(group_id_raw)
 
     # 获取活跃比赛
@@ -194,6 +271,8 @@ async def handle_match_leaderboard(self, event: AstrMessageEvent) -> AsyncIterat
             match.match_name,
             top_participants,
         ),
-        generate_text_func=lambda: generate_match_leaderboard_text(match.match_name, top_participants),
+        generate_text_func=lambda: generate_match_leaderboard_text(
+            match.match_name, top_participants
+        ),
     ):
         yield result
