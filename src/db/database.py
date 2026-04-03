@@ -121,6 +121,50 @@ class DBManager:
             await conn.execute(text("PRAGMA optimize"))
             await conn.commit()
 
+        await self.validate_db()
+
+    async def validate_db(self):
+        """校验数据库表和字段是否完整"""
+        from . import tables  # noqa: F401
+
+        expected_tables = {
+            table_name: set(table.columns.keys())
+            for table_name, table in SQLModel.metadata.tables.items()
+        }
+
+        async with self.engine.connect() as conn:
+            result = await conn.execute(
+                text("SELECT name FROM sqlite_master WHERE type = 'table'")
+            )
+            existing_tables = {str(row[0]) for row in result.fetchall()}
+
+            missing_tables = sorted(
+                table_name
+                for table_name in expected_tables
+                if table_name not in existing_tables
+            )
+            if missing_tables:
+                raise RuntimeError(f"数据库缺少数据表: {', '.join(missing_tables)}")
+
+            missing_columns: dict[str, list[str]] = {}
+            for table_name, expected_columns in expected_tables.items():
+                pragma_result = await conn.execute(
+                    text(f'PRAGMA table_info("{table_name}")')
+                )
+                existing_columns = {
+                    str(row[1]) for row in pragma_result.fetchall() if len(row) > 1
+                }
+                table_missing_columns = sorted(expected_columns - existing_columns)
+                if table_missing_columns:
+                    missing_columns[table_name] = table_missing_columns
+
+            if missing_columns:
+                missing_parts = [
+                    f"{table_name} 缺少字段: {', '.join(columns)}"
+                    for table_name, columns in missing_columns.items()
+                ]
+                raise RuntimeError("数据库结构不完整: " + "; ".join(missing_parts))
+
     @asynccontextmanager
     async def get_session(self) -> AsyncGenerator[AsyncSession, None]:
         """异步获取数据库会话的上下文管理器"""
