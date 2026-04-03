@@ -84,7 +84,6 @@ async def handle_fc(
     # 确保数据库初始化
     try:
         await self.db.init_db()
-        logger.info("[Mrfzccl] 数据库初始化完成")
     except Exception as e:
         logger.error(f"[Mrfzccl] 数据库初始化失败: {e}")
         response = event.chain_result(
@@ -149,7 +148,6 @@ async def handle_fcc(
     # 确保数据库初始化
     try:
         await self.db.init_db()
-        logger.info("[Mrfzccl] 数据库初始化完成")
     except Exception as e:
         logger.error(f"[Mrfzccl] 数据库初始化失败: {e}")
         responses.append(event.chain_result(

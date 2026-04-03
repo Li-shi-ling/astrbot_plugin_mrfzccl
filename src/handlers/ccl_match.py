@@ -15,7 +15,6 @@ from ..tool import generate_image_or_fallback, generate_match_leaderboard_text
 async def ensure_match_db_ready(self, event: AstrMessageEvent) -> Any | None:
     try:
         await self.db.init_db()
-        logger.info("[Mrfzccl] 比赛模式数据库初始化完成")
         return None
     except Exception as e:
         logger.error(f"[Mrfzccl] 比赛模式数据库初始化失败: {e}")
