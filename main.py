@@ -306,7 +306,7 @@ class Mrfzccl(Star):
         """获取提示 /fct"""
         group_id = event.get_group_id()
         sender_id = str(event.get_sender_id())
-        is_group = group_id is not None
+        is_group = bool(group_id)
         group_id_str = str(group_id) if is_group else None
         user_id = group_id_str if is_group else sender_id
 
@@ -331,7 +331,7 @@ class Mrfzccl(Star):
         """一次性获取三条提示 /fcw"""
         group_id = event.get_group_id()
         sender_id = str(event.get_sender_id())
-        is_group = group_id is not None
+        is_group = bool(group_id)
         group_id_str = str(group_id) if is_group else None
         user_id = group_id_str if is_group else sender_id
 

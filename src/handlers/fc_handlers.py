@@ -152,12 +152,12 @@ async def handle_fcc(
         logger.info("[Mrfzccl] 数据库初始化完成")
     except Exception as e:
         logger.error(f"[Mrfzccl] 数据库初始化失败: {e}")
-        response = event.chain_result(
+        responses.append(event.chain_result(
             [
                 Comp.At(qq=sender_id),
                 Comp.Plain(" 数据库初始化失败，请联系管理员"),
             ]
-        )
+        ))
         return responses, match_end_payload
 
     logger.debug(
