@@ -50,11 +50,15 @@ class DBManager:
 
     async def _init_db_once(self):
         """初始化数据库，创建所有定义的表"""
-        from . import tables  # noqa: F401
+        plugin_tables = self._get_plugin_tables()
 
         async with self.engine.begin() as conn:
             try:
-                await conn.run_sync(SQLModel.metadata.create_all)
+                await conn.run_sync(
+                    lambda sync_conn: SQLModel.metadata.create_all(
+                        sync_conn, tables=list(plugin_tables.values())
+                    )
+                )
             except OperationalError as e:
                 if "already exists" not in str(e):
                     raise
@@ -125,11 +129,9 @@ class DBManager:
 
     async def validate_db(self):
         """校验数据库表和字段是否完整"""
-        from . import tables  # noqa: F401
-
         expected_tables = {
             table_name: set(table.columns.keys())
-            for table_name, table in SQLModel.metadata.tables.items()
+            for table_name, table in self._get_plugin_tables().items()
         }
 
         async with self.engine.connect() as conn:
@@ -164,6 +166,16 @@ class DBManager:
                     for table_name, columns in missing_columns.items()
                 ]
                 raise RuntimeError("数据库结构不完整: " + "; ".join(missing_parts))
+
+    def _get_plugin_tables(self):
+        from . import tables
+
+        return {
+            tables.UserQnAStats.__table__.name: tables.UserQnAStats.__table__,
+            tables.Match.__table__.name: tables.Match.__table__,
+            tables.MatchParticipant.__table__.name: tables.MatchParticipant.__table__,
+            tables.MatchHonor.__table__.name: tables.MatchHonor.__table__,
+        }
 
     @asynccontextmanager
     async def get_session(self) -> AsyncGenerator[AsyncSession, None]:
