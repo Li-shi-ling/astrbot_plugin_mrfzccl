@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import Any
 
 from astrbot.api.event import AstrMessageEvent
 
@@ -47,7 +48,9 @@ async def handle_reset_user_honors_cmd(
         yield event.plain_result("✅ 您的荣誉数据已清除")
 
 
-async def handle_reset_all_data_cmd(self, event: AstrMessageEvent) -> AsyncIterator[Any]:
+async def handle_reset_all_data_cmd(
+    self, event: AstrMessageEvent
+) -> AsyncIterator[Any]:
     """清除所有用户的答题数据（仅管理员）/ccl 清除所有数据"""
     sender_id = str(event.get_sender_id())
 
@@ -60,7 +63,9 @@ async def handle_reset_all_data_cmd(self, event: AstrMessageEvent) -> AsyncItera
     yield event.plain_result("✅ 所有用户的答题数据已清除")
 
 
-async def handle_reset_all_honors_cmd(self, event: AstrMessageEvent) -> AsyncIterator[Any]:
+async def handle_reset_all_honors_cmd(
+    self, event: AstrMessageEvent
+) -> AsyncIterator[Any]:
     """清除所有用户的荣誉数据（仅管理员）/ccl 清除所有荣誉"""
     sender_id = str(event.get_sender_id())
 
@@ -91,7 +96,9 @@ async def handle_grant_honor_cmd(
 
     # 检查参数完整性
     if not target_user_id or not match_name:
-        yield event.plain_result("❌ 请提供完整参数: /ccl 授予荣誉 [user_id] [名次] [比赛名称] [答对数量]")
+        yield event.plain_result(
+            "❌ 请提供完整参数: /ccl 授予荣誉 [user_id] [名次] [比赛名称] [答对数量]"
+        )
         return
 
     # 根据名次生成奖牌表情
