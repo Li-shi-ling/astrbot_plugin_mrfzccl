@@ -81,30 +81,17 @@ async def handle_fc(
     """Core logic for `/fc` (expects room lock is held by caller)."""
     response = None
 
-    # 确保数据库初始化
-    try:
-        await self.db.init_db()
-    except Exception as e:
-        logger.error(f"[Mrfzccl] 数据库初始化失败: {e}")
-        response = event.chain_result(
-            [
-                Comp.At(qq=sender_id),
-                Comp.Plain(" 数据库初始化失败，请联系管理员"),
-            ]
-        )
-
-    if response is None:
-        # 检查是否在比赛模式和是否限制（仅群聊）
-        match = await self.match_repo.get_active_match(group_id) if is_group else None
-        # 非管理员进行次数检测
-        if self.admin_ids and sender_id not in [str(x) for x in self.admin_ids]:
-            # 非比赛模式下检查每日限制
-            if not match and not check_daily_limit(
-                sender_id, self.daily_counter, self.daily_limit
-            ):
-                response = event.plain_result(
-                    f"今日游戏次数已达上限({self.daily_limit}次)，请明天再来！"
-                )
+    # 检查是否在比赛模式和是否限制（仅群聊）
+    match = await self.match_repo.get_active_match(group_id) if is_group else None
+    # 非管理员进行次数检测
+    if self.admin_ids and sender_id not in [str(x) for x in self.admin_ids]:
+        # 非比赛模式下检查每日限制
+        if not match and not check_daily_limit(
+            sender_id, self.daily_counter, self.daily_limit
+        ):
+            response = event.plain_result(
+                f"今日游戏次数已达上限({self.daily_limit}次)，请明天再来！"
+            )
 
     if response is None:
         try:
@@ -141,22 +128,10 @@ async def handle_fcc(
 ) -> tuple[list[Any], tuple[str, list] | None]:
     """Core logic for `/fcc` (expects room lock is held by caller)."""
     responses: list[Any] = []
+
     match_end_payload: tuple[str, list] | None = (
         None  # (ended_match_name, ended_top_participants)
     )
-
-    # 确保数据库初始化
-    try:
-        await self.db.init_db()
-    except Exception as e:
-        logger.error(f"[Mrfzccl] 数据库初始化失败: {e}")
-        responses.append(event.chain_result(
-            [
-                Comp.At(qq=sender_id),
-                Comp.Plain(" 数据库初始化失败，请联系管理员"),
-            ]
-        ))
-        return responses, match_end_payload
 
     logger.debug(
         f"[fcc] user_id={user_id}, player_keys={list(self.player.keys())}, has_active={has_active_game(self.player, user_id)}"
@@ -393,8 +368,6 @@ async def handle_fct(
     group_id: str | None,
 ) -> Any | None:
     """Core logic for `/fct` (expects room lock is held by caller)."""
-    response = None
-
     # 检查比赛模式下是否有权限（仅群聊）
     match = await self.match_repo.get_active_match(group_id) if is_group else None
     if match and self.admin_ids and sender_id not in [str(x) for x in self.admin_ids]:
@@ -424,8 +397,6 @@ async def handle_fcw(
     group_id: str | None,
 ) -> Any | None:
     """Core logic for `/fcw` (expects room lock is held by caller)."""
-    response = None
-
     # 检查比赛模式下是否有权限（仅群聊）
     match = await self.match_repo.get_active_match(group_id) if is_group else None
     if match and self.admin_ids and sender_id not in [str(x) for x in self.admin_ids]:

@@ -5,20 +5,9 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 import astrbot.api.message_components as Comp
-from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 
 from ..tool import generate_image_or_fallback, generate_match_leaderboard_text
-
-
-# 安全执行比赛模式相关数据库初始化
-async def ensure_match_db_ready(self, event: AstrMessageEvent) -> Any | None:
-    try:
-        await self.db.init_db()
-        return None
-    except Exception as e:
-        logger.error(f"[Mrfzccl] 比赛模式数据库初始化失败: {e}")
-        return event.plain_result("数据库初始化失败，请联系管理员。")
 
 
 async def handle_match_help(self, event: AstrMessageEvent) -> AsyncIterator[Any]:
@@ -46,11 +35,6 @@ async def handle_match_create(
     group_id_raw = event.get_group_id()
     if not group_id_raw:
         yield event.plain_result("请在群聊中使用")
-        return
-
-    db_error = await ensure_match_db_ready(self, event)
-    if db_error is not None:
-        yield db_error
         return
 
     group_id = str(group_id_raw)
@@ -98,10 +82,6 @@ async def match_start_precheck(
     group_id_raw = event.get_group_id()
     if not group_id_raw:
         return False, None, event.plain_result("请在群聊中使用")
-
-    db_error = await ensure_match_db_ready(self, event)
-    if db_error is not None:
-        return False, None, db_error
 
     sender_id = str(event.get_sender_id())
     group_id = str(group_id_raw)
@@ -164,10 +144,6 @@ async def match_end_precheck(
     if not group_id_raw:
         return False, None, event.plain_result("请在群聊中使用")
 
-    db_error = await ensure_match_db_ready(self, event)
-    if db_error is not None:
-        return False, None, db_error
-
     sender_id = str(event.get_sender_id())
     group_id = str(group_id_raw)
 
@@ -217,11 +193,6 @@ async def handle_match_leaderboard(self, event: AstrMessageEvent) -> AsyncIterat
     group_id_raw = event.get_group_id()
     if not group_id_raw:
         yield event.plain_result("请在群聊中使用")
-        return
-
-    db_error = await ensure_match_db_ready(self, event)
-    if db_error is not None:
-        yield db_error
         return
 
     group_id = str(group_id_raw)
