@@ -8,6 +8,7 @@ from sqlalchemy.engine import CursorResult
 from .tables import UserQnAStats, Match, MatchParticipant, MatchHonor
 from .database import DBManager
 
+
 class UserQnARepo:
     """用户问答统计仓库，封装所有的数据库交互逻辑"""
 
@@ -15,11 +16,11 @@ class UserQnARepo:
         self.db = db_manager
 
     # 获取或者创建用户数据
-    async def get_or_create_user_stats(self, session: AsyncSession, user_id: str, user_name: str = "") -> UserQnAStats:
+    async def get_or_create_user_stats(
+        self, session: AsyncSession, user_id: str, user_name: str = ""
+    ) -> UserQnAStats:
         """并发安全的 get_or_create 用户统计记录"""
-        stmt = select(UserQnAStats).where(
-            UserQnAStats.user_id == user_id
-        )
+        stmt = select(UserQnAStats).where(UserQnAStats.user_id == user_id)
 
         result = await session.execute(stmt)
         record = result.scalar_one_or_none()
@@ -39,7 +40,7 @@ class UserQnARepo:
             wrong_count=0,
             tip_count=0,
             created_at=datetime.now(),
-            updated_at=datetime.now()
+            updated_at=datetime.now(),
         )
         session.add(record)
 
@@ -52,7 +53,9 @@ class UserQnARepo:
             return result.scalar_one()
 
     # 获取用户数据
-    async def get_user_stats_only(self, session: AsyncSession, user_id: str) -> Optional[UserQnAStats]:
+    async def get_user_stats_only(
+        self, session: AsyncSession, user_id: str
+    ) -> Optional[UserQnAStats]:
         """
         只获取用户数据，如果用户不存在则返回None
 
@@ -63,9 +66,7 @@ class UserQnARepo:
         返回:
             UserQnAStats 或 None
         """
-        stmt = select(UserQnAStats).where(
-            UserQnAStats.user_id == user_id
-        )
+        stmt = select(UserQnAStats).where(UserQnAStats.user_id == user_id)
 
         result = await session.execute(stmt)
         return result.scalar_one_or_none()
@@ -73,7 +74,9 @@ class UserQnARepo:
     # ========== 增加操作 ==========
 
     # 增加答题正确数量
-    async def increment_correct_count(self, user_id: str, user_name: str = "", increment: int = 1) -> bool:
+    async def increment_correct_count(
+        self, user_id: str, user_name: str = "", increment: int = 1
+    ) -> bool:
         """增加用户答对次数（原子操作）"""
         async with self.db.get_session() as session:
             # 先尝试更新现有记录
@@ -82,7 +85,7 @@ class UserQnARepo:
                 .where(UserQnAStats.user_id == user_id)
                 .values(
                     correct_count=UserQnAStats.correct_count + increment,
-                    updated_at=datetime.now()
+                    updated_at=datetime.now(),
                 )
             )
 
@@ -90,7 +93,9 @@ class UserQnARepo:
 
             if result.rowcount == 0:
                 # 记录不存在，创建新记录
-                record = await self.get_or_create_user_stats(session, user_id, user_name)
+                record = await self.get_or_create_user_stats(
+                    session, user_id, user_name
+                )
                 record.correct_count += increment
                 record.updated_at = datetime.now()
                 await session.commit()
@@ -108,7 +113,9 @@ class UserQnARepo:
             return True
 
     # 增加答题错误数量
-    async def increment_wrong_count(self, user_id: str, user_name: str = "", increment: int = 1) -> bool:
+    async def increment_wrong_count(
+        self, user_id: str, user_name: str = "", increment: int = 1
+    ) -> bool:
         """增加用户答错次数（原子操作）"""
         async with self.db.get_session() as session:
             stmt = (
@@ -116,7 +123,7 @@ class UserQnARepo:
                 .where(UserQnAStats.user_id == user_id)
                 .values(
                     wrong_count=UserQnAStats.wrong_count + increment,
-                    updated_at=datetime.now()
+                    updated_at=datetime.now(),
                 )
             )
 
@@ -124,7 +131,9 @@ class UserQnARepo:
 
             if result.rowcount == 0:
                 # 记录不存在，创建新记录
-                record = await self.get_or_create_user_stats(session, user_id, user_name)
+                record = await self.get_or_create_user_stats(
+                    session, user_id, user_name
+                )
                 record.wrong_count += increment
                 record.updated_at = datetime.now()
                 await session.commit()
@@ -142,7 +151,9 @@ class UserQnARepo:
             return True
 
     # 增加提示次数
-    async def increment_tip_count(self, user_id: str, user_name: str = "", increment: int = 1) -> bool:
+    async def increment_tip_count(
+        self, user_id: str, user_name: str = "", increment: int = 1
+    ) -> bool:
         """增加用户提示次数（原子操作）"""
         async with self.db.get_session() as session:
             stmt = (
@@ -150,7 +161,7 @@ class UserQnARepo:
                 .where(UserQnAStats.user_id == user_id)
                 .values(
                     tip_count=UserQnAStats.tip_count + increment,
-                    updated_at=datetime.now()
+                    updated_at=datetime.now(),
                 )
             )
 
@@ -158,7 +169,9 @@ class UserQnARepo:
 
             if result.rowcount == 0:
                 # 记录不存在，创建新记录
-                record = await self.get_or_create_user_stats(session, user_id, user_name)
+                record = await self.get_or_create_user_stats(
+                    session, user_id, user_name
+                )
                 record.tip_count += increment
                 record.updated_at = datetime.now()
                 await session.commit()
@@ -176,7 +189,13 @@ class UserQnARepo:
             return True
 
     # 增加答题正确和答题错误数量
-    async def increment_both_counts(self, user_id: str, user_name: str = "", correct_increment: int = 1, wrong_increment: int = 1) -> bool:
+    async def increment_both_counts(
+        self,
+        user_id: str,
+        user_name: str = "",
+        correct_increment: int = 1,
+        wrong_increment: int = 1,
+    ) -> bool:
         """同时增加用户答对和答错次数（原子操作）"""
         async with self.db.get_session() as session:
             # 先尝试更新现有记录
@@ -186,7 +205,7 @@ class UserQnARepo:
                 .values(
                     correct_count=UserQnAStats.correct_count + correct_increment,
                     wrong_count=UserQnAStats.wrong_count + wrong_increment,
-                    updated_at=datetime.now()
+                    updated_at=datetime.now(),
                 )
             )
 
@@ -194,7 +213,9 @@ class UserQnARepo:
 
             if result.rowcount == 0:
                 # 记录不存在，创建新记录
-                record = await self.get_or_create_user_stats(session, user_id, user_name)
+                record = await self.get_or_create_user_stats(
+                    session, user_id, user_name
+                )
                 record.correct_count += correct_increment
                 record.wrong_count += wrong_increment
                 record.updated_at = datetime.now()
@@ -213,16 +234,27 @@ class UserQnARepo:
             return True
 
     # 增加所有计数器（正确、错误、提示）
-    async def increment_all_counts(self, user_id: str, user_name: str = "", correct_increment: int = 0, wrong_increment: int = 0, tip_increment: int = 0) -> bool:
+    async def increment_all_counts(
+        self,
+        user_id: str,
+        user_name: str = "",
+        correct_increment: int = 0,
+        wrong_increment: int = 0,
+        tip_increment: int = 0,
+    ) -> bool:
         """同时增加用户所有计数器（原子操作）"""
         async with self.db.get_session() as session:
             # 构建更新值字典
             update_values = {"updated_at": datetime.now()}
 
             if correct_increment != 0:
-                update_values["correct_count"] = UserQnAStats.correct_count + correct_increment
+                update_values["correct_count"] = (
+                    UserQnAStats.correct_count + correct_increment
+                )
             if wrong_increment != 0:
-                update_values["wrong_count"] = UserQnAStats.wrong_count + wrong_increment
+                update_values["wrong_count"] = (
+                    UserQnAStats.wrong_count + wrong_increment
+                )
             if tip_increment != 0:
                 update_values["tip_count"] = UserQnAStats.tip_count + tip_increment
 
@@ -241,7 +273,9 @@ class UserQnARepo:
 
             if result.rowcount == 0:
                 # 记录不存在，创建新记录
-                record = await self.get_or_create_user_stats(session, user_id, user_name)
+                record = await self.get_or_create_user_stats(
+                    session, user_id, user_name
+                )
 
                 if correct_increment != 0:
                     record.correct_count += correct_increment
@@ -268,7 +302,9 @@ class UserQnARepo:
     # ========== 查询操作 ==========
 
     # 按ID查找用户并获取当前排名
-    async def get_user_stats_with_rank(self, user_id: str) -> Tuple[Optional[UserQnAStats], Optional[int], int]:
+    async def get_user_stats_with_rank(
+        self, user_id: str
+    ) -> Tuple[Optional[UserQnAStats], Optional[int], int]:
         """
         按ID查找用户并获取当前排名
 
@@ -295,12 +331,10 @@ class UserQnARepo:
 
             # 计算排名: correct_count 越高排名越高
             # 使用窗口函数或子查询计算排名
-            rank_stmt = select(
-                func.count().label('rank')
-            ).where(
+            rank_stmt = select(func.count().label("rank")).where(
                 and_(
                     UserQnAStats.correct_count > user_record.correct_count,
-                    UserQnAStats.user_id != user_id
+                    UserQnAStats.user_id != user_id,
                 )
             )
             rank_result = await session.execute(rank_stmt)
@@ -352,7 +386,9 @@ class UserQnARepo:
         async with self.db.get_session() as session:
             stmt = (
                 select(UserQnAStats)
-                .order_by(desc(UserQnAStats.tip_count), desc(UserQnAStats.correct_count))
+                .order_by(
+                    desc(UserQnAStats.tip_count), desc(UserQnAStats.correct_count)
+                )
                 .limit(limit)
             )
 
@@ -371,7 +407,7 @@ class UserQnARepo:
             stmt = select(
                 UserQnAStats.tip_count,
                 UserQnAStats.correct_count,
-                UserQnAStats.wrong_count
+                UserQnAStats.wrong_count,
             ).where(UserQnAStats.user_id == user_id)
 
             result = await session.execute(stmt)
@@ -384,7 +420,14 @@ class UserQnARepo:
     # ========== 创建/更新操作 ==========
 
     # 创建或更新用户统计记录（完整记录）
-    async def create_or_update_user(self, user_id: str, user_name: str, correct_count: int = 0, wrong_count: int = 0, tip_count: int = 0) -> UserQnAStats:
+    async def create_or_update_user(
+        self,
+        user_id: str,
+        user_name: str,
+        correct_count: int = 0,
+        wrong_count: int = 0,
+        tip_count: int = 0,
+    ) -> UserQnAStats:
         """创建或更新用户统计记录（完整记录，包含 tip_count）"""
         async with self.db.get_session() as session:
             record = await self.get_or_create_user_stats(session, user_id, user_name)
@@ -421,18 +464,16 @@ class UserQnARepo:
             for user_data in users_data:
                 try:
                     record = await self.get_or_create_user_stats(
-                        session,
-                        user_data['user_id'],
-                        user_data.get('user_name', '')
+                        session, user_data["user_id"], user_data.get("user_name", "")
                     )
 
                     # 更新数据（可以设置为增量或覆盖，这里用增量）
-                    if 'correct_count' in user_data:
-                        record.correct_count += user_data['correct_count']
-                    if 'wrong_count' in user_data:
-                        record.wrong_count += user_data['wrong_count']
-                    if 'tip_count' in user_data:
-                        record.tip_count += user_data['tip_count']
+                    if "correct_count" in user_data:
+                        record.correct_count += user_data["correct_count"]
+                    if "wrong_count" in user_data:
+                        record.wrong_count += user_data["wrong_count"]
+                    if "tip_count" in user_data:
+                        record.tip_count += user_data["tip_count"]
 
                     record.updated_at = datetime.now()
                     processed_count += 1
@@ -447,23 +488,24 @@ class UserQnARepo:
         return processed_count
 
     # 更新用户提示次数（直接设置）
-    async def update_tip_count(self, user_id: str, tip_count: int, user_name: str = "") -> bool:
+    async def update_tip_count(
+        self, user_id: str, tip_count: int, user_name: str = ""
+    ) -> bool:
         """更新用户提示次数（直接设置值）"""
         async with self.db.get_session() as session:
             stmt = (
                 update(UserQnAStats)
                 .where(UserQnAStats.user_id == user_id)
-                .values(
-                    tip_count=tip_count,
-                    updated_at=datetime.now()
-                )
+                .values(tip_count=tip_count, updated_at=datetime.now())
             )
 
             result: CursorResult = await session.execute(stmt)
 
             if result.rowcount == 0:
                 # 记录不存在，创建新记录
-                record = await self.get_or_create_user_stats(session, user_id, user_name)
+                record = await self.get_or_create_user_stats(
+                    session, user_id, user_name
+                )
                 record.tip_count = tip_count
                 record.updated_at = datetime.now()
                 await session.commit()
@@ -483,7 +525,9 @@ class UserQnARepo:
     # ========== 其他操作 ==========
 
     # 分页获取用户排名
-    async def get_user_rankings_page(self, page: int = 1, page_size: int = 20) -> Tuple[List[UserQnAStats], int]:
+    async def get_user_rankings_page(
+        self, page: int = 1, page_size: int = 20
+    ) -> Tuple[List[UserQnAStats], int]:
         """
         分页获取用户排名
 
@@ -517,7 +561,9 @@ class UserQnARepo:
             return users, total_users
 
     # 根据用户名关键词搜索用户
-    async def search_users_by_name(self, name_keyword: str, limit: int = 10) -> List[UserQnAStats]:
+    async def search_users_by_name(
+        self, name_keyword: str, limit: int = 10
+    ) -> List[UserQnAStats]:
         """
         根据用户名关键词搜索用户
 
@@ -598,7 +644,9 @@ class UserQnARepo:
     # ========== 信息获取操作 ==========
 
     # 获取正确个数排行榜
-    async def get_correct_answers_leaderboard(self, limit: int = 10, offset: int = 0) -> List[UserQnAStats]:
+    async def get_correct_answers_leaderboard(
+        self, limit: int = 10, offset: int = 0
+    ) -> List[UserQnAStats]:
         """
         获取正确个数排行榜
 
@@ -631,7 +679,7 @@ class UserQnARepo:
                     correct_count=0,
                     wrong_count=0,
                     tip_count=0,
-                    updated_at=datetime.now()
+                    updated_at=datetime.now(),
                 )
             )
             await session.execute(stmt)
@@ -641,20 +689,16 @@ class UserQnARepo:
     async def reset_all_stats(self):
         """重置所有用户的答题数据"""
         async with self.db.get_session() as session:
-            stmt = (
-                update(UserQnAStats)
-                .values(
-                    correct_count=0,
-                    wrong_count=0,
-                    tip_count=0,
-                    updated_at=datetime.now()
-                )
+            stmt = update(UserQnAStats).values(
+                correct_count=0, wrong_count=0, tip_count=0, updated_at=datetime.now()
             )
             await session.execute(stmt)
             await session.commit()
 
     # 获取错误个数排行榜
-    async def get_wrong_answers_leaderboard(self, limit: int = 10, offset: int = 0) -> List[UserQnAStats]:
+    async def get_wrong_answers_leaderboard(
+        self, limit: int = 10, offset: int = 0
+    ) -> List[UserQnAStats]:
         """
         获取错误个数排行榜
 
@@ -677,7 +721,9 @@ class UserQnARepo:
             return list(result.scalars().all())
 
     # 获取提示次数排行榜
-    async def get_hints_usage_leaderboard(self, limit: int = 10, offset: int = 0) -> List[UserQnAStats]:
+    async def get_hints_usage_leaderboard(
+        self, limit: int = 10, offset: int = 0
+    ) -> List[UserQnAStats]:
         """
         获取提示次数排行榜
 
@@ -700,7 +746,9 @@ class UserQnARepo:
             return list(result.scalars().all())
 
     # 获取用户个人信息及在各种排行榜中的排名
-    async def get_user_profile_with_rank(self, user_id: str) -> Tuple[Optional[UserQnAStats], dict]:
+    async def get_user_profile_with_rank(
+        self, user_id: str
+    ) -> Tuple[Optional[UserQnAStats], dict]:
         """
         获取用户个人信息及在各种排行榜中的排名
 
@@ -718,36 +766,30 @@ class UserQnARepo:
                 return None, {}
 
             # 计算正确个数排名
-            correct_rank_stmt = select(
-                func.count().label('rank')
-            ).where(
+            correct_rank_stmt = select(func.count().label("rank")).where(
                 and_(
                     UserQnAStats.correct_count > user_stats.correct_count,
-                    UserQnAStats.user_id != user_id
+                    UserQnAStats.user_id != user_id,
                 )
             )
             correct_rank_result = await session.execute(correct_rank_stmt)
             correct_rank = (correct_rank_result.scalar_one() or 0) + 1
 
             # 计算错误个数排名
-            wrong_rank_stmt = select(
-                func.count().label('rank')
-            ).where(
+            wrong_rank_stmt = select(func.count().label("rank")).where(
                 and_(
                     UserQnAStats.wrong_count > user_stats.wrong_count,
-                    UserQnAStats.user_id != user_id
+                    UserQnAStats.user_id != user_id,
                 )
             )
             wrong_rank_result = await session.execute(wrong_rank_stmt)
             wrong_rank = (wrong_rank_result.scalar_one() or 0) + 1
 
             # 计算提示次数排名
-            tip_rank_stmt = select(
-                func.count().label('rank')
-            ).where(
+            tip_rank_stmt = select(func.count().label("rank")).where(
                 and_(
                     UserQnAStats.tip_count > user_stats.tip_count,
-                    UserQnAStats.user_id != user_id
+                    UserQnAStats.user_id != user_id,
                 )
             )
             tip_rank_result = await session.execute(tip_rank_stmt)
@@ -760,15 +802,19 @@ class UserQnARepo:
 
             # 计算准确率（如果答过题）
             total_answers = user_stats.correct_count + user_stats.wrong_count
-            accuracy = (user_stats.correct_count / total_answers * 100) if total_answers > 0 else 0
+            accuracy = (
+                (user_stats.correct_count / total_answers * 100)
+                if total_answers > 0
+                else 0
+            )
 
             rank_info = {
-                'correct_rank': correct_rank,
-                'wrong_rank': wrong_rank,
-                'tip_rank': tip_rank,
-                'total_users': total_users,
-                'accuracy': accuracy,
-                'total_answers': total_answers
+                "correct_rank": correct_rank,
+                "wrong_rank": wrong_rank,
+                "tip_rank": tip_rank,
+                "total_users": total_users,
+                "accuracy": accuracy,
+                "total_answers": total_answers,
             }
 
             return user_stats, rank_info
@@ -806,13 +852,14 @@ class UserQnARepo:
             avg_correct = total_correct / total_users if total_users > 0 else 0
 
             return {
-                'total_users': total_users,
-                'total_correct': total_correct,
-                'total_wrong': total_wrong,
-                'total_tips': total_tips,
-                'avg_correct': avg_correct,
-                'total_questions': total_correct + total_wrong
+                "total_users": total_users,
+                "total_correct": total_correct,
+                "total_wrong": total_wrong,
+                "total_tips": total_tips,
+                "avg_correct": avg_correct,
+                "total_questions": total_correct + total_wrong,
             }
+
 
 class MatchRepo:
     """比赛数据仓库"""
@@ -821,7 +868,13 @@ class MatchRepo:
         self.db = db_manager
 
     # 创建新比赛
-    async def create_match(self, group_id: str, match_name: str, question_limit: int = 0, time_limit: int = 0) -> Match:
+    async def create_match(
+        self,
+        group_id: str,
+        match_name: str,
+        question_limit: int = 0,
+        time_limit: int = 0,
+    ) -> Match:
         """
         创建新比赛
 
@@ -840,7 +893,7 @@ class MatchRepo:
                 match_name=match_name,
                 is_active=True,
                 question_limit=question_limit,
-                time_limit=time_limit
+                time_limit=time_limit,
             )
             session.add(match)
             await session.commit()
@@ -873,9 +926,7 @@ class MatchRepo:
             match_id: 比赛ID
         """
         async with self.db.get_session() as session:
-            stmt = select(Match).where(
-                Match.match_id == match_id
-            )
+            stmt = select(Match).where(Match.match_id == match_id)
             result = await session.execute(stmt)
             match = result.scalar_one_or_none()
             if match:
@@ -892,9 +943,7 @@ class MatchRepo:
             match_id: 比赛ID
         """
         async with self.db.get_session() as session:
-            stmt = select(Match).where(
-                Match.match_id == match_id
-            )
+            stmt = select(Match).where(Match.match_id == match_id)
             result = await session.execute(stmt)
             match = result.scalar_one_or_none()
             if match:
@@ -903,7 +952,9 @@ class MatchRepo:
                 await session.commit()
 
     # 添加参赛者
-    async def add_participant(self, match_id: int, user_id: str, user_name: str) -> MatchParticipant:
+    async def add_participant(
+        self, match_id: int, user_id: str, user_name: str
+    ) -> MatchParticipant:
         """
         向比赛添加参赛者
 
@@ -919,7 +970,7 @@ class MatchRepo:
             stmt = select(MatchParticipant).where(
                 and_(
                     MatchParticipant.match_id == match_id,
-                    MatchParticipant.user_id == user_id
+                    MatchParticipant.user_id == user_id,
                 )
             )
             result = await session.execute(stmt)
@@ -940,7 +991,9 @@ class MatchRepo:
             return participant
 
     # 获取参赛者
-    async def get_participant(self, match_id: int, user_id: str) -> Optional[MatchParticipant]:
+    async def get_participant(
+        self, match_id: int, user_id: str
+    ) -> Optional[MatchParticipant]:
         """
         获取指定比赛的指定参赛者
 
@@ -955,7 +1008,7 @@ class MatchRepo:
             stmt = select(MatchParticipant).where(
                 and_(
                     MatchParticipant.match_id == match_id,
-                    MatchParticipant.user_id == user_id
+                    MatchParticipant.user_id == user_id,
                 )
             )
             result = await session.execute(stmt)
@@ -990,14 +1043,16 @@ class MatchRepo:
             stmt = select(MatchParticipant).where(
                 and_(
                     MatchParticipant.match_id == match_id,
-                    MatchParticipant.user_id == user_id
+                    MatchParticipant.user_id == user_id,
                 )
             )
             result = await session.execute(stmt)
             participant = result.scalar_one_or_none()
             if participant:
                 participant.correct_count += 1
-                participant.score = participant.correct_count - participant.wrong_count / 3.0
+                participant.score = (
+                    participant.correct_count - participant.wrong_count / 3.0
+                )
                 await session.commit()
 
     # 增加参赛者错误数
@@ -1013,18 +1068,29 @@ class MatchRepo:
             stmt = select(MatchParticipant).where(
                 and_(
                     MatchParticipant.match_id == match_id,
-                    MatchParticipant.user_id == user_id
+                    MatchParticipant.user_id == user_id,
                 )
             )
             result = await session.execute(stmt)
             participant = result.scalar_one_or_none()
             if participant:
                 participant.wrong_count += 1
-                participant.score = participant.correct_count - participant.wrong_count / 3.0
+                participant.score = (
+                    participant.correct_count - participant.wrong_count / 3.0
+                )
                 await session.commit()
 
     # 保存荣誉记录
-    async def save_honor(self, user_id: str, match_id: int, match_name: str, rank: int, correct_count: int, wrong_count: int = 0, score: float = 0.0):
+    async def save_honor(
+        self,
+        user_id: str,
+        match_id: int,
+        match_name: str,
+        rank: int,
+        correct_count: int,
+        wrong_count: int = 0,
+        score: float = 0.0,
+    ):
         """
         保存用户的比赛荣誉记录
 
@@ -1068,9 +1134,14 @@ class MatchRepo:
                     return
 
             honor = MatchHonor(
-                user_id=user_id, match_id=match_id, match_name=match_name,
-                rank=rank, correct_count=correct_count, wrong_count=wrong_count,
-                score=score, medal=medal
+                user_id=user_id,
+                match_id=match_id,
+                match_name=match_name,
+                rank=rank,
+                correct_count=correct_count,
+                wrong_count=wrong_count,
+                score=score,
+                medal=medal,
             )
             session.add(honor)
             await session.commit()
@@ -1087,11 +1158,20 @@ class MatchRepo:
             荣誉记录列表，按排名降序排列
         """
         async with self.db.get_session() as session:
-            stmt = select(MatchHonor).where(MatchHonor.user_id == user_id).order_by(desc(MatchHonor.rank))
+            stmt = (
+                select(MatchHonor)
+                .where(MatchHonor.user_id == user_id)
+                .order_by(
+                    MatchHonor.rank.asc(),
+                    MatchHonor.score.desc(),
+                    MatchHonor.correct_count.desc(),
+                    MatchHonor.created_at.desc(),
+                )
+            )
             result = await session.execute(stmt)
             honors = list(result.scalars().all())
 
-            # 兼容历史数据：同一场比赛可能被重复写入荣誉，名片展示时去重
+            # 兼容历史数据：同一场比赛可能被重复写入荣誉，名片展示时保留更好的名次
             deduped: list[MatchHonor] = []
             seen_match_ids: set[int] = set()
             seen_virtual: set[tuple] = set()

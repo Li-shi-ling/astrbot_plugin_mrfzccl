@@ -95,3 +95,4 @@ AstrBot 插件：遮挡干员立绘猜名字；支持排行榜、名片、比赛
  *感谢所有参与测试的明日方舟博士们！游戏愉快！🎮*
  *欢迎iss和pr,我看见了会认真修改的！*
  
+[![Moe Counter](https://count.getloli.com/get/@li-shi-ling?theme=minecraft)](https://github.com/Li-shi-ling/astrbot_plugin_mrfzccl)
