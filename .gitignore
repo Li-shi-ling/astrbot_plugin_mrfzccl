@@ -208,3 +208,6 @@ __marimo__/
 
 # My
 cs/
+AGENTS.md
+.pipeline-workspace
+test
