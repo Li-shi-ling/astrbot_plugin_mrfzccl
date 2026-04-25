@@ -3,6 +3,7 @@ from astrbot.api.star import Context, Star, register
 import astrbot.api.message_components as Comp
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.star import StarTools
+from astrbot.core.utils.astrbot_path import get_astrbot_temp_path
 
 from .src.QnAStatsRenderer import QnAStatsRenderer
 from .src.tool import (
@@ -155,7 +156,7 @@ class Mrfzccl(Star):
         self.match_repo = MatchRepo(self.db)  # 比赛仓库
 
         # 构建临时图片路径
-        self.img_tmp_path = Path(self.storage_dir) / "tmp"
+        self.img_tmp_path = Path(get_astrbot_temp_path())
         self.img_tmp_path.mkdir(parents=True, exist_ok=True)
 
         # 初始化问答统计渲染器
@@ -203,10 +204,6 @@ class Mrfzccl(Star):
         except Exception as e:
             logger.error(f"[Mrfzccl] 加载数据文件时发生未知错误: {e}")
             logger.error(traceback.format_exc())
-
-        # 清理任务相关
-        self.cleanup_task: asyncio.Task | None = None
-        self.cleanup_running = True
 
     # ========== 游戏相关指令 ==========
     # 初始化游戏命令
@@ -1416,7 +1413,6 @@ class Mrfzccl(Star):
     async def initialize(self):
         await self.db.init_db()
         logger.debug(f"[Mrfzccl] 初始化数据库{self.db.db_url}")
-        await self.start_cleanup_task()
 
     # 插件卸载时的清理钩子
     async def terminate(self):
@@ -1434,75 +1430,6 @@ class Mrfzccl(Star):
         if self._session and not self._session.closed:
             await self._session.close()
             logger.debug("[Mrfzccl] HTTP会话已关闭")
-        await self.stop_cleanup_task()
-
-    # 开启定时清理任务
-    async def start_cleanup_task(self, interval_hours=1):
-        """启动定时清理任务"""
-        self.cleanup_running = True
-        self.cleanup_task = asyncio.create_task(self._periodic_cleanup(interval_hours))
-        return self.cleanup_task
-
-    # 关闭定时清理任务
-    async def stop_cleanup_task(self):
-        """停止定时清理任务（带超时保护）"""
-        self.cleanup_running = False
-
-        if self.cleanup_task:
-            self.cleanup_task.cancel()
-            try:
-                # 最多等 2 秒让任务自己退出
-                await asyncio.wait_for(self.cleanup_task, timeout=2)
-            except asyncio.TimeoutError:
-                logger.warning("[Mrfzccl] 清理任务取消超时，强制退出")
-            except asyncio.CancelledError:
-                # 正常情况
-                pass
-            finally:
-                self.cleanup_task = None
-
-    # 定时清理任务
-    async def _periodic_cleanup(self, interval_hours=1):
-        """可控制的定期清理"""
-        while self.cleanup_running:
-            try:
-                # 等待指定时间
-                await asyncio.sleep(interval_hours * 3600)
-
-                # 检查是否还在运行
-                if not self.cleanup_running:
-                    break
-
-                # 执行清理
-                await self._cleanup_old_images()
-                removed = self._cleanup_stale_room_locks(max_idle_hours=24)
-                if removed:
-                    logger.debug(f"[Mrfzccl] 清理闲置 room locks: {removed}")
-
-            except asyncio.CancelledError:
-                # 任务被取消
-                break
-            except Exception as e:
-                # 记录错误但不停止任务
-                logger.error(f"[Mrfzccl] 清理任务出错: {e}")
-                await asyncio.sleep(60)  # 出错后等待1分钟再重试
-
-    # 清理超过指定时间的图片
-    async def _cleanup_old_images(self, max_age_hours=1):
-        """清理超过指定时间的图片"""
-        cutoff_time = time.time() - max_age_hours * 3600
-
-        try:
-            # 遍历临时目录中的所有PNG图片
-            for file_path in self.img_tmp_path.glob("*.png"):
-                if os.path.getmtime(file_path) < cutoff_time:
-                    try:
-                        os.remove(file_path)
-                        logger.info(f"🧹 清理旧图片: {file_path}")
-                    except:
-                        pass
-        except Exception as e:
-            logger.error(f"清理图片时出错: {e}")
 
     # 获取或创建 HTTP 会话
     async def _get_session(self) -> aiohttp.ClientSession:
