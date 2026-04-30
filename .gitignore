@@ -211,3 +211,4 @@ cs/
 AGENTS.md
 .pipeline-workspace
 test
+.idea/
