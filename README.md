@@ -68,7 +68,7 @@ AstrBot 插件：遮挡干员立绘猜名字；支持排行榜、名片、比赛
 - `similarity_threshold`: 相似度阈值（SequenceMatcher）
 - `calculate_threshold`: 字符覆盖率阈值
 - `enable_homophone`: 同音字识别
-- `daily_game_limit`: 每日开局次数（0=不限制）
+- `daily_game_limit`: 每日开局次数（0<不限制）
 - `match_question_limit`: 比赛题目上限（0=不限制）
 - `match_time_limit`: 比赛时间上限（分钟；0=不限制）
 - `match_hint_delay`: 比赛超时自动提示（秒；0=关闭；默认 30）
