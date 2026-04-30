@@ -84,7 +84,7 @@ async def handle_fc(
     # 检查是否在比赛模式和是否限制（仅群聊）
     match = await self.match_repo.get_active_match(group_id) if is_group else None
     # 非管理员进行次数检测
-    if self.admin_ids and sender_id not in [str(x) for x in self.admin_ids]:
+    if not self.admin_ids or sender_id not in [str(x) for x in self.admin_ids]:
         # 非比赛模式下检查每日限制
         if not match and not check_daily_limit(
             sender_id, self.daily_counter, self.daily_limit

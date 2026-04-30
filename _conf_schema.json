@@ -51,7 +51,7 @@
     "description": "每个用户每日开启游戏次数限制",
     "type": "int",
     "default": 10,
-    "hint": "0表示无限制"
+    "hint": "-1表示无限制"
   },
   "match_question_limit": {
     "description": "比赛答题数量限制(0表示不限制)",

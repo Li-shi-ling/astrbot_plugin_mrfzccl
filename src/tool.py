@@ -292,6 +292,8 @@ def check_homophone(correct: str, guess: str, enable_homophone: bool = False) ->
 
 def check_daily_limit(user_id: str, daily_counter: dict, daily_limit: int) -> bool:
     """检查并更新每日计数器，返回是否允许继续游戏"""
+    if daily_limit < 0:
+        return True
     today = datetime.now().date()
     key = f"{user_id}_{today}"
     count = daily_counter.get(key, 0)
