@@ -81,6 +81,16 @@ AstrBot 插件：遮挡干员立绘猜名字；支持排行榜、名片、比赛
 - `operator_aliases_path`: 干员别名数据 JSON 路径（默认 `arknights_operator_aliases.json`）
 - `renderer_theme`: 排行榜/名片主题
 
+## 本地打包
+
+在插件目录执行：
+
+```bash
+python scripts/package_plugin.py
+```
+
+脚本只打包 `git ls-files` 返回的已跟踪文件，默认输出到 `dist/astrbot_plugin_mrfzccl-<version>.zip`。压缩包第一项会显式写入 `astrbot_plugin_mrfzccl/` 顶层目录，符合 AstrBot 本地上传安装时的解压结构要求。
+
  ## 📊 数据来源 
  - 感谢blibliwiki的立绘资源 
  - 干员数据基于公开的明日方舟游戏信息 
