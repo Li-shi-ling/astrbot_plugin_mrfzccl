@@ -143,7 +143,12 @@
     "description": "LLM 兜底判题配置(仅在前置判题都失败时启用)",
     "type": "object",
     "items": {
-      "model": {
+      "enabled": {
+        "description": "是否启用",
+        "type": "bool",
+        "default": false
+      },
+      "provider_id": {
         "description": "模型选择",
         "type": "string",
         "default": "",

@@ -86,7 +86,10 @@ class Mrfzccl(Star):
         llm_judge = self.Config.get("llm_judge", {}) or {}
         if not isinstance(llm_judge, dict):
             llm_judge = {}
-        self.llm_judge_model = str(llm_judge.get("model", "") or "").strip()
+        self.llm_judge_enabled = bool(llm_judge.get("enabled", False))
+        self.llm_judge_provider_id = str(
+            llm_judge.get("provider_id", llm_judge.get("model", "")) or ""
+        ).strip()
         self.llm_judge_prompt = str(
             llm_judge.get(
                 "prompt",
@@ -970,7 +973,10 @@ class Mrfzccl(Star):
         *,
         unified_msg_origin: str | None = None,
     ) -> bool:
-        provider_id = str(getattr(self, "llm_judge_model", "") or "").strip()
+        if not bool(getattr(self, "llm_judge_enabled", False)):
+            return False
+
+        provider_id = str(getattr(self, "llm_judge_provider_id", "") or "").strip()
         if not provider_id:
             return False
 
