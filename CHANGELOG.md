@@ -4,6 +4,7 @@
 - ✅ `llm_judge` 新增显式 `enabled` 开关，关闭时不会触发任何 LLM 判题请求
 - ✅ `llm_judge.model` 改为 `llm_judge.provider_id`，并接入 AstrBot 原生 `select_provider` 选择器
 - ✅ 收紧后台 LLM 判题逻辑，仅在启用且成功选到 Provider 后才会执行
+- ✅ `llm_judge` 新增 `debug` 开关，开启后会详细打印 LLM 判题输入与输出
 
 ### 1.2.15
 - ✅ 修复 `image_download_retry` 被错误配置为非对象时可能导致插件启动失败的问题

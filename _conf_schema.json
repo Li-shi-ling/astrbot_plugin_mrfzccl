@@ -164,6 +164,11 @@
         "editor_language": "text",
         "editor_theme": "vs-light"
       },
+      "debug": {
+        "description": "是否开启调试日志",
+        "type": "bool",
+        "default": false
+      },
       "enable_retry": {
         "description": "是否启动重试机制",
         "type": "bool",

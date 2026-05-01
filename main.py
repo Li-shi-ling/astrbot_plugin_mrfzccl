@@ -97,6 +97,7 @@ class Mrfzccl(Star):
             )
             or ""
         )
+        self.llm_judge_debug = bool(llm_judge.get("debug", False))
         self.llm_judge_enable_retry = bool(llm_judge.get("enable_retry", False))
         self.llm_judge_max_retries = max(
             0,
@@ -986,6 +987,14 @@ class Mrfzccl(Star):
             return False
 
         prompt = self._build_llm_judge_prompt(answer, guess)
+        if bool(getattr(self, "llm_judge_debug", False)):
+            logger.info(
+                "[llm_judge] 输入 provider_id=%s answer=%s guess=%s prompt=%s",
+                provider_id,
+                answer,
+                guess,
+                prompt,
+            )
         max_attempts = 1 + max(
             0,
             int(getattr(self, "llm_judge_max_retries", 0) or 0)
@@ -999,13 +1008,18 @@ class Mrfzccl(Star):
                     prompt=prompt,
                     session_id=f"mrfzccl-judge-{time.time_ns()}",
                 )
+                completion_text = str(getattr(response, "completion_text", "") or "")
+                if bool(getattr(self, "llm_judge_debug", False)):
+                    logger.info("[llm_judge] 输出 raw_completion=%s", completion_text)
                 result = self._parse_llm_judge_result(
-                    getattr(response, "completion_text", "")
+                    completion_text
                 )
                 if result is None:
                     raise ValueError(
-                        f"LLM 判题输出不合法: {getattr(response, 'completion_text', '')}"
+                        f"LLM 判题输出不合法: {completion_text}"
                     )
+                if bool(getattr(self, "llm_judge_debug", False)):
+                    logger.info("[llm_judge] 解析结果 parsed_result=%s", result)
                 return result
             except Exception as exc:
                 if attempt >= max_attempts:
