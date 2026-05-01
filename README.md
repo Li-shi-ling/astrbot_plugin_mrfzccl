@@ -68,6 +68,7 @@ AstrBot 插件：遮挡干员立绘猜名字；支持排行榜、名片、比赛
 - `similarity_threshold`: 相似度阈值（SequenceMatcher）
 - `calculate_threshold`: 字符覆盖率阈值
 - `enable_homophone`: 同音字识别
+- `enable_operator_alias_match`: 是否启用干员别名精确判别
 - `daily_game_limit`: 每日开局次数（0<不限制）
 - `match_question_limit`: 比赛题目上限（0=不限制）
 - `match_time_limit`: 比赛时间上限（分钟；0=不限制）
@@ -76,11 +77,23 @@ AstrBot 插件：遮挡干员立绘猜名字；支持排行榜、名片、比赛
 - `require_admin`: 排行榜/名片是否仅管理员可用
 - `low_weight_characters`: 低权重干员关键词（逗号分隔）
 - `low_weight_ratio`: 低权重干员出现比例
-- `character_aliases`: 别名映射（`别名:正名,...`）
+- `character_aliases`: 旧版别名映射（`别名:正名,...`）
+- `character_aliases_json`: JSON 版别名映射（更适合人工编辑，会与 `character_aliases` 合并并去重）
+- `operator_aliases_path`: 干员别名数据 JSON 路径（默认 `arknights_operator_aliases.json`）
 - `renderer_theme`: 排行榜/名片主题
 
+## 本地打包工具
+
+在插件目录执行：
+
+```bash
+python scripts/package_plugin.py
+```
+
+脚本将打包 `git ls-files` 返回的已跟踪文件，默认输出到 `dist/astrbot_plugin_mrfzccl-<version>.zip`。
+
  ## 📊 数据来源 
- - 感谢blibliwiki的立绘资源 
+ - 感谢bilibili wiki的立绘资源 
  - 干员数据基于公开的明日方舟游戏信息 
 
  ## 📄 许可证 

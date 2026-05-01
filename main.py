@@ -9,7 +9,10 @@ from .src.QnAStatsRenderer import QnAStatsRenderer
 from .src.tool import (
     generate_match_leaderboard_text,
     has_active_game,
+    load_operator_aliases,
+    merge_alias_maps,
     parse_aliases,
+    parse_aliases_json_text,
 )
 from .src.db.repo import UserQnARepo, MatchRepo
 from .src.db.database import DBManager
@@ -72,6 +75,10 @@ class Mrfzccl(Star):
         self.calculate_threshold = self.Config.get("calculate_threshold", 0.5)
         # 是否启用同音字匹配
         self.enable_homophone = self.Config.get("enable_homophone", False)
+        # 是否启用干员别名精确判题
+        self.enable_operator_alias_match = self.Config.get(
+            "enable_operator_alias_match", True
+        )
 
         # 每日限制配置
         self.daily_limit = self.Config.get("daily_game_limit", 10)  # 每日游戏次数限制
@@ -104,6 +111,7 @@ class Mrfzccl(Star):
 
         # 别名系统
         self.alias_map: dict = {}  # 干员别名映射
+        self.operator_aliases_by_name: dict[str, list[str]] = {}
         self._load_aliases()  # 加载别名配置
 
         # 低权重干员配置（出现概率较低的干员）
@@ -879,7 +887,21 @@ class Mrfzccl(Star):
         alias_str = self.Config.get(
             "character_aliases", "钛铱:白金,宫羽:澄闪,小刻:刻俄柏,小羊:艾雅法拉"
         )
-        self.alias_map = parse_aliases(alias_str)
+        alias_json_text = self.Config.get(
+            "character_aliases_json",
+            '{}',
+        )
+        self.alias_map = merge_alias_maps(
+            parse_aliases(alias_str),
+            parse_aliases_json_text(alias_json_text),
+        )
+        alias_file = self.Config.get(
+            "operator_aliases_path", "arknights_operator_aliases.json"
+        )
+        alias_file = Path(alias_file)
+        if not alias_file.is_absolute():
+            alias_file = Path(__file__).resolve().parent / alias_file
+        self.operator_aliases_by_name = load_operator_aliases(alias_file)
 
     # 初始化游戏，返回临时文件路径
     async def fc_init(self, user_id: str) -> bytes | str | None:

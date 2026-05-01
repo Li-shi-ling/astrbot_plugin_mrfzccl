@@ -5,6 +5,12 @@
     "default": "arknights_skins_dict.json",
     "hint": "例如：/home/user/arknights_skins_dict.json"
   },
+  "operator_aliases_path": {
+    "description": "干员别名数据JSON路径(默认使用插件自带数据)",
+    "type": "string",
+    "default": "arknights_operator_aliases.json",
+    "hint": "例如：/home/user/arknights_operator_aliases.json"
+  },
   "target_size": {
     "description": "角色立绘最后输出的参考大小",
     "type": "int",
@@ -27,6 +33,12 @@
     "description": "启用同音字识别,例如「银灰」和「银辉」都会被识别为正确",
     "type": "bool",
     "default": false,
+    "hint": "true开启,false关闭"
+  },
+  "enable_operator_alias_match": {
+    "description": "是否启用干员别名精确判别(按当前真名查别名列表,输入完全相等即判对)",
+    "type": "bool",
+    "default": true,
     "hint": "true开启,false关闭"
   },
   "easy_probability": {
@@ -100,6 +112,15 @@
     "type": "string",
     "default": "小刻:刻俄柏,小羊:艾雅法拉,42:史尔特尔,42姐:史尔特尔,玫剑圣:玫兰莎,克天使:克洛丝,kokodayo:克洛丝,猛男:安塞尔,医疗小车:Lancet-2,近卫小车:Castle-3,太子爷:12F,桃:桃金娘,富婆:杰西卡,阿米驴:阿米娅,银老板:银灰,前夫哥:银灰,虎鲸:斯卡蒂,蒂蒂:斯卡蒂,大腿夹剑:斯卡蒂,老爷子:赫拉格,大公:赫拉格,肠粉龙:陈,煌猫:煌,寒哥:棘刺,傻狗:刻俄柏,忧郁蓝调:莫斯提马,企鹅:麦哲伦,瑕子姐:瑕光,闪剑圣:闪灵,喜羊羊:闪灵,塞爹:塞雷娅,塞妈:塞雷娅,莱茵拳皇:塞雷娅,鬼姐:星熊,星sir:星熊",
     "hint": "格式: 别名1:正名1,别名2:正名2"
+  },
+  "character_aliases_json": {
+    "description": "干员别名映射(会与旧格式合并)",
+    "type": "text",
+    "hint": "输入 JSON 对象，例如: {\"小刻\": \"刻俄柏\", \"小羊\": \"艾雅法拉\"}",
+    "default": "{\n\t\"小刻\": \"刻俄柏\",\n\t\"小羊\": \"艾雅法拉\",\n\t\"42\": \"史尔特尔\"\n}",
+    "editor_mode": true,
+    "editor_language": "json",
+    "editor_theme": "vs-light"
   },
   "renderer_theme": {
     "description": "问答统计图片主题",

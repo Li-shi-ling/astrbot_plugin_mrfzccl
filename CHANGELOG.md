@@ -1,5 +1,37 @@
 ## 更新日志
 
+### 1.2.12
+- ✅ 统一清理日志与命令行打包脚本中的英文自然语言文本，改为中文表述
+
+### 1.2.11
+- ✅ 为 `src/tool.py` 中的每个函数补充统一的一行中文注释
+
+### 1.2.10
+- ✅ 为 `src/handlers/fc_handlers.py` 中的每个函数补充统一的一行中文注释
+
+### 1.2.9
+- ✅ 修复比赛宽限期判定与当前题别名判定不一致的问题，兼容原始输入精确别名命中与旧别名归一化
+
+### 1.2.8
+- ✅ 调整 `character_aliases_json` 默认值的换行与制表符格式，兼容现有 JSON 编辑体验
+
+### 1.2.7
+- ✅ 新增更适合人工编辑的 `character_aliases_json` 配置项，支持 JSON 格式维护别名
+- ✅ 兼容保留旧版 `character_aliases`，并与 JSON 版别名配置合并去重
+- ✅ 优化别名配置说明与编辑器提示，降低手工维护成本
+
+### 1.2.6
+- ✅ 修复干员别名 JSON 解析异常时可能导致插件启动失败的问题
+- ✅ 修复空白干员名被写入别名索引的问题
+- ✅ 修复比赛宽限期判断中未保留旧别名映射归一化的问题
+- ✅ 优化别名精确匹配时的首尾空白处理，并修正文档中的 bilibili wiki 文案
+
+### 1.2.5
+- ✅ 新增干员别名数据文件，支持按真名精确匹配别名判题
+- ✅ 新增别名判别开关与别名数据文件路径配置
+- ✅ 新增插件本地打包脚本，可生成 AstrBot 安装 zip
+- ✅ 补充开发约束：改代码必须更新版本号，变更完成后必须执行打包
+
 ### 1.2.4
 - ✅ 优化数据库初始化
 - ✅ 修复每日开启游戏次数无限制设置问题
@@ -48,7 +80,3 @@
  - ✅ 模糊匹配算法 
  - ✅ 提示系统 
  - ✅ 多会话支持 
-### v1.2.2
-- Add plugin-local testing rules in `AGENTS.md`.
-- Add pytest coverage for tool helpers, database repositories, and renderer output flow.
-- Validate the plugin test suite from `data/plugins/astrbot_plugin_mrfzccl/test`.
