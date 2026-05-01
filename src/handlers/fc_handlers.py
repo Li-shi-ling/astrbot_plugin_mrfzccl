@@ -80,6 +80,38 @@ def _is_recent_previous_match_answer(
 
     return _is_matching_answer(self, previous_answer_text, normalized_guess)
 
+
+async def _is_recent_previous_match_answer_with_llm(
+    self,
+    player_state: dict[str, Any],
+    guess: str,
+    unified_msg_origin: str | None = None,
+) -> bool:
+    if _is_recent_previous_match_answer(self, player_state, guess):
+        return True
+
+    previous_answer = player_state.get("previous_answer")
+    if not previous_answer:
+        return False
+
+    previous_answer_text = str(previous_answer)
+    if await self.judge_answer_with_llm(
+        previous_answer_text,
+        guess,
+        unified_msg_origin=unified_msg_origin,
+    ):
+        return True
+
+    normalized_guess = resolve_alias(guess, getattr(self, "alias_map", {}))
+    if normalized_guess == guess:
+        return False
+
+    return await self.judge_answer_with_llm(
+        previous_answer_text,
+        normalized_guess,
+        unified_msg_origin=unified_msg_origin,
+    )
+
 # 处理 `/fc` 指令并启动一局新的猜题流程。
 async def handle_fc(
     self,
@@ -192,18 +224,26 @@ async def handle_fcc(
         correct_name,
         resolved_guess,
     )
-    is_correct = exact_alias_match or fuzzy_match_correct
+    llm_match_correct = False
+    if not exact_alias_match and not fuzzy_match_correct:
+        llm_match_correct = await self.judge_answer_with_llm(
+            correct_name,
+            guess_text,
+            unified_msg_origin=event.unified_msg_origin,
+        )
+    is_correct = exact_alias_match or fuzzy_match_correct or llm_match_correct
     previous_answer_matched = False
     if is_group and match and group_id is not None:
-        previous_answer_matched = _is_recent_previous_match_answer(
+        previous_answer_matched = await _is_recent_previous_match_answer_with_llm(
             self,
             player_state,
             guess_text,
+            event.unified_msg_origin,
         )
 
     logger.debug(
         f"[答题判断] 正确答案: {correct_name}, 用户回答: {guess_text}, 解析后: {resolved_guess}, 别名精确匹配: {exact_alias_match}, 相似度: {similarity:.2f}, "
-        f"字匹配率: {calculate:.2f}, 同音匹配: {homophone_match}, 阈值: {self.similarity_threshold}/{self.calculate_threshold}, "
+        f"字匹配率: {calculate:.2f}, 同音匹配: {homophone_match}, LLM 判题: {llm_match_correct}, 阈值: {self.similarity_threshold}/{self.calculate_threshold}, "
         f"结果: {is_correct}"
     )
 
