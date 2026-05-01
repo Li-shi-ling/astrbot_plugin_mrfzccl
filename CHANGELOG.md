@@ -1,5 +1,8 @@
 ## 更新日志
 
+### 1.2.15
+- ✅ 修复 `image_download_retry` 被错误配置为非对象时可能导致插件启动失败的问题
+
 ### 1.2.14
 - ✅ 将图片下载重试配置收口为 `image_download_retry` 对象
 - ✅ 新增图片下载重试间隔秒数配置 `retry_interval_seconds`

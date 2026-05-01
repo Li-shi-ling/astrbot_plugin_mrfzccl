@@ -80,6 +80,8 @@ class Mrfzccl(Star):
         )
         # 下载 bilibili wiki 图片时的重试配置
         image_download_retry = self.Config.get("image_download_retry", {}) or {}
+        if not isinstance(image_download_retry, dict):
+            image_download_retry = {}
         self.image_download_max_retries = max(
             0,
             int(
