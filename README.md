@@ -63,6 +63,7 @@ AstrBot 插件：遮挡干员立绘猜名字；支持排行榜、名片、比赛
 ## 配置（`_conf_schema.json`）
 
 - `mrfz_data_path`: 题库 JSON 路径（默认 `arknights_skins_dict.json`）
+- `image_download_retry`: bilibili wiki 图片下载重试配置（包含最大重试次数和重试间隔秒数）
 - `target_size`: 输出图片参考大小
 - `easy_probability` / `medium_probability` / `hard_probability`: 难度概率
 - `similarity_threshold`: 相似度阈值（SequenceMatcher）

@@ -1,5 +1,16 @@
 ## 更新日志
 
+### 1.2.15
+- ✅ 修复 `image_download_retry` 被错误配置为非对象时可能导致插件启动失败的问题
+
+### 1.2.14
+- ✅ 将图片下载重试配置收口为 `image_download_retry` 对象
+- ✅ 新增图片下载重试间隔秒数配置 `retry_interval_seconds`
+
+### 1.2.13
+- ✅ 为 bilibili wiki 图片获取增加失败重试机制
+- ✅ 新增 `image_download_max_retries` 配置项，可设置图片下载最大重试次数
+
 ### 1.2.12
 - ✅ 统一清理日志与命令行打包脚本中的英文自然语言文本，改为中文表述
 
