@@ -146,7 +146,7 @@ async def handle_fcc(
     )
 
     logger.debug(
-        f"[fcc] user_id={user_id}, player_keys={list(self.player.keys())}, has_active={has_active_game(self.player, user_id)}"
+        f"[fcc] 用户ID={user_id}, 当前房间键={list(self.player.keys())}, 是否有激活游戏={has_active_game(self.player, user_id)}"
     )
 
     # 检查是否有活跃比赛
@@ -224,7 +224,7 @@ async def handle_fcc(
                 self._safe_cancel_task(self.match_next_task.pop(group_id, None))
         elif previous_answer_matched:
             logger.debug(
-                f"[fcc] Ignore stale correct answer in match group_id={group_id}, sender_id={sender_id}, guess={resolved_guess}"
+                f"[fcc] 忽略上一题宽限期内的迟到正确答案，群ID={group_id}，发送者ID={sender_id}，回答={resolved_guess}"
             )
         else:
             await self.match_repo.increment_participant_wrong(

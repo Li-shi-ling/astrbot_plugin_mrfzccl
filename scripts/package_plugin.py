@@ -12,14 +12,14 @@ DEFAULT_OUTPUT_DIR = PLUGIN_ROOT / "dist"
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Package tracked plugin files into an AstrBot local-install zip.",
+        description="将已跟踪的插件文件打包为 AstrBot 本地安装 zip。",
     )
     parser.add_argument(
         "-o",
         "--output",
         type=Path,
         default=None,
-        help="Output zip path. Defaults to dist/<plugin-name>-<version>.zip.",
+        help="输出 zip 路径，默认使用 dist/<插件名>-<版本号>.zip。",
     )
     args = parser.parse_args()
 
@@ -46,24 +46,24 @@ def read_metadata_name_and_version() -> tuple[str, str]:
         elif line.startswith("version:"):
             version = line.split(":", 1)[1].strip().split("#", 1)[0].strip()
     if not name or not version:
-        raise RuntimeError("metadata.yaml must contain name and version.")
+        raise RuntimeError("metadata.yaml 必须包含 name 和 version 字段。")
     return name, version
 
 
 def package_plugin(output_path: Path) -> Path:
     tracked_files = list_tracked_files()
     if not tracked_files:
-        raise RuntimeError("No git tracked files found.")
+        raise RuntimeError("未找到任何 Git 已跟踪文件。")
 
     plugin_name, _ = read_metadata_name_and_version()
     package_root = plugin_name.strip().strip("/\\")
     if not package_root:
-        raise RuntimeError("metadata.yaml must contain a valid plugin name.")
+        raise RuntimeError("metadata.yaml 中的插件名无效。")
 
     output_path = output_path.resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(output_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        # AstrBot v4.22.x expects the first zip entry to be a directory.
+        # AstrBot v4.22.x 要求 zip 的第一项是目录。
         zf.writestr(f"{package_root}/", "")
         for relative_path in tracked_files:
             source_path = PLUGIN_ROOT / relative_path

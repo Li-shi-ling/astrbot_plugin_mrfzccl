@@ -297,7 +297,7 @@ def parse_aliases_json_text(alias_text: str) -> dict[str, str]:
     try:
         raw_data = json.loads(str(alias_text))
     except json.JSONDecodeError as exc:
-        logger.warning(f"[Mrfzccl] Failed to parse character alias JSON config: {exc}")
+        logger.warning(f"[Mrfzccl] 解析干员别名 JSON 配置失败: {exc}")
         return {}
 
     if not isinstance(raw_data, dict):
@@ -342,7 +342,7 @@ def load_operator_aliases(path: str | Path) -> dict[str, list[str]]:
             raw_data = json.load(file)
     except (OSError, json.JSONDecodeError) as exc:
         logger.warning(
-            f"[Mrfzccl] Failed to load operator aliases from {alias_path}: {exc}"
+            f"[Mrfzccl] 加载干员别名文件失败 {alias_path}: {exc}"
         )
         return {}
 
