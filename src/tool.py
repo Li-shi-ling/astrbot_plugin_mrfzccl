@@ -279,6 +279,43 @@ def parse_aliases(alias_str: str) -> dict[str, str]:
         alias_map[alias] = name
     return alias_map
 
+
+def parse_aliases_json_text(alias_text: str) -> dict[str, str]:
+    """Parse a JSON object alias config into alias -> canonical name mapping."""
+    if not alias_text:
+        return {}
+
+    try:
+        raw_data = json.loads(str(alias_text))
+    except json.JSONDecodeError as exc:
+        logger.warning(f"[Mrfzccl] Failed to parse character alias JSON config: {exc}")
+        return {}
+
+    if not isinstance(raw_data, dict):
+        return {}
+
+    alias_map: dict[str, str] = {}
+    for alias, name in raw_data.items():
+        if not isinstance(alias, str) or not isinstance(name, str):
+            continue
+        normalized_alias = alias.strip()
+        normalized_name = name.strip()
+        if not normalized_alias or not normalized_name:
+            continue
+        alias_map[normalized_alias] = normalized_name
+    return alias_map
+
+
+def merge_alias_maps(*alias_maps: Mapping[str, str]) -> dict[str, str]:
+    """Merge multiple alias maps with later maps overriding earlier ones."""
+    merged: dict[str, str] = {}
+    for alias_map in alias_maps:
+        for alias, name in (alias_map or {}).items():
+            if not alias or not name:
+                continue
+            merged[alias] = name
+    return merged
+
 def resolve_alias(name: str, alias_map: Mapping[str, str]) -> str:
     """将别名解析为正名（若不存在则返回原值）"""
     return (alias_map or {}).get(name, name)

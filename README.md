@@ -77,7 +77,8 @@ AstrBot 插件：遮挡干员立绘猜名字；支持排行榜、名片、比赛
 - `require_admin`: 排行榜/名片是否仅管理员可用
 - `low_weight_characters`: 低权重干员关键词（逗号分隔）
 - `low_weight_ratio`: 低权重干员出现比例
-- `character_aliases`: 别名映射（`别名:正名,...`）
+- `character_aliases`: 旧版别名映射（`别名:正名,...`）
+- `character_aliases_json`: JSON 版别名映射（更适合人工编辑，会与 `character_aliases` 合并并去重）
 - `operator_aliases_path`: 干员别名数据 JSON 路径（默认 `arknights_operator_aliases.json`）
 - `renderer_theme`: 排行榜/名片主题
 

@@ -10,7 +10,9 @@ from .src.tool import (
     generate_match_leaderboard_text,
     has_active_game,
     load_operator_aliases,
+    merge_alias_maps,
     parse_aliases,
+    parse_aliases_json_text,
 )
 from .src.db.repo import UserQnARepo, MatchRepo
 from .src.db.database import DBManager
@@ -885,7 +887,14 @@ class Mrfzccl(Star):
         alias_str = self.Config.get(
             "character_aliases", "钛铱:白金,宫羽:澄闪,小刻:刻俄柏,小羊:艾雅法拉"
         )
-        self.alias_map = parse_aliases(alias_str)
+        alias_json_text = self.Config.get(
+            "character_aliases_json",
+            '{}',
+        )
+        self.alias_map = merge_alias_maps(
+            parse_aliases(alias_str),
+            parse_aliases_json_text(alias_json_text),
+        )
         alias_file = self.Config.get(
             "operator_aliases_path", "arknights_operator_aliases.json"
         )
