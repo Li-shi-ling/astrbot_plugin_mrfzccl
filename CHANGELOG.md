@@ -48,7 +48,3 @@
  - ✅ 模糊匹配算法 
  - ✅ 提示系统 
  - ✅ 多会话支持 
-### v1.2.2
-- Add plugin-local testing rules in `AGENTS.md`.
-- Add pytest coverage for tool helpers, database repositories, and renderer output flow.
-- Validate the plugin test suite from `data/plugins/astrbot_plugin_mrfzccl/test`.
