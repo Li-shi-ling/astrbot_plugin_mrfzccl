@@ -16,20 +16,19 @@ from .src.tool import (
 )
 from .src.db.repo import UserQnARepo, MatchRepo
 from .src.db.database import DBManager
-
 from .src.handlers import ccl_admin, ccl_leaderboard, ccl_match, fc_handlers
 
 from typing import Optional, Dict, Any, Tuple, List
 from datetime import datetime, timedelta
 from urllib.parse import urlparse
-from io import BytesIO
 from pathlib import Path
+from io import BytesIO
 from PIL import Image
 import numpy as np
 import traceback
+import ipaddress
 import asyncio
 import aiohttp
-import ipaddress
 import random
 import json
 import time
@@ -78,6 +77,22 @@ class Mrfzccl(Star):
         # 是否启用干员别名精确判题
         self.enable_operator_alias_match = self.Config.get(
             "enable_operator_alias_match", True
+        )
+        # 下载 bilibili wiki 图片时的重试配置
+        image_download_retry = self.Config.get("image_download_retry", {}) or {}
+        self.image_download_max_retries = max(
+            0,
+            int(
+                image_download_retry.get(
+                    "max_retries",
+                    self.Config.get("image_download_max_retries", 2),
+                )
+                or 0
+            ),
+        )
+        self.image_download_retry_interval_seconds = max(
+            0.0,
+            float(image_download_retry.get("retry_interval_seconds", 0.5) or 0.0),
         )
 
         # 每日限制配置
@@ -1139,53 +1154,74 @@ class Mrfzccl(Star):
     async def get_image_from_url(
         self, url: str, timeout: int = 10
     ) -> Optional[Image.Image]:
-        try:
-            # 检查URL协议
-            if not url.startswith(("http://", "https://")):
-                raise ValueError(f"无效的URL协议: {url}")
+        # 检查URL协议
+        if not url.startswith(("http://", "https://")):
+            raise ValueError(f"无效的URL协议: {url}")
 
-            # 安全检查：防止访问内网地址
-            parsed_url = urlparse(url)
-            hostname = parsed_url.hostname
-            if hostname:
-                hostname_norm = str(hostname).strip().lower()
-                if hostname_norm == "localhost":
-                    raise ValueError(f"禁止访问内网地址: {hostname}")
-                try:
-                    ip = ipaddress.ip_address(hostname_norm)
-                except ValueError:
-                    ip = None
-                if ip and not ip.is_global:
-                    raise ValueError(f"禁止访问内网地址: {hostname}")
+        # 安全检查：防止访问内网地址
+        parsed_url = urlparse(url)
+        hostname = parsed_url.hostname
+        if hostname:
+            hostname_norm = str(hostname).strip().lower()
+            if hostname_norm == "localhost":
+                raise ValueError(f"禁止访问内网地址: {hostname}")
+            try:
+                ip = ipaddress.ip_address(hostname_norm)
+            except ValueError:
+                ip = None
+            if ip and not ip.is_global:
+                raise ValueError(f"禁止访问内网地址: {hostname}")
 
-            # 获取HTTP会话
-            session = await self._get_session()
-            async with session.get(
-                url,
-                ssl=False,  # 忽略SSL证书验证
-            ) as response:
-                if response.status != 200:
-                    raise Exception(f"HTTP {response.status}: {response.reason}")
+        max_attempts = max(1, int(getattr(self, "image_download_max_retries", 2)) + 1)
+        last_error: Exception | None = None
 
-                # 读取响应内容
-                content = await response.read()
-                if len(content) == 0:
-                    raise Exception("下载的图片数据为空")
-                if len(content) > 10 * 1024 * 1024:  # 限制10MB
-                    raise Exception("图片文件过大")
+        for attempt in range(1, max_attempts + 1):
+            try:
+                # 获取HTTP会话
+                session = await self._get_session()
+                async with session.get(
+                    url,
+                    ssl=False,  # 忽略SSL证书验证
+                ) as response:
+                    if response.status != 200:
+                        raise Exception(f"HTTP {response.status}: {response.reason}")
 
-                # 在线程池中加载图片
-                loop = asyncio.get_running_loop()
-                image = await loop.run_in_executor(
-                    None, self._load_image_from_bytes, content
+                    # 读取响应内容
+                    content = await response.read()
+                    if len(content) == 0:
+                        raise Exception("下载的图片数据为空")
+                    if len(content) > 10 * 1024 * 1024:  # 限制10MB
+                        raise Exception("图片文件过大")
+
+                    # 在线程池中加载图片
+                    loop = asyncio.get_running_loop()
+                    image = await loop.run_in_executor(
+                        None, self._load_image_from_bytes, content
+                    )
+                    return image
+            except ValueError:
+                raise
+            except (aiohttp.ClientError, Exception) as e:
+                last_error = e
+                if attempt >= max_attempts:
+                    break
+                logger.warning(
+                    f"[get_image_from_url] 获取 bilibili wiki 图片失败，准备重试 "
+                    f"({attempt}/{max_attempts - 1}): {e}"
                 )
-                return image
-        except (aiohttp.ClientError, ValueError) as e:
-            logger.error(f"[get_image_from_url] 请求失败: {e}")
-            raise
-        except Exception as e:
-            logger.error(f"[get_image_from_url] 处理图片时出错: {e}")
-            raise
+                retry_interval = float(
+                    getattr(self, "image_download_retry_interval_seconds", 0.0) or 0.0
+                )
+                if retry_interval > 0:
+                    await asyncio.sleep(retry_interval)
+
+        if isinstance(last_error, aiohttp.ClientError):
+            logger.error(f"[get_image_from_url] 请求失败: {last_error}")
+            raise last_error
+        if last_error is not None:
+            logger.error(f"[get_image_from_url] 处理图片时出错: {last_error}")
+            raise last_error
+        raise RuntimeError("获取图片失败，未捕获到具体错误")
 
     # 同步加载图片（在线程池中执行）
     def _load_image_from_bytes(self, content: bytes) -> Image.Image:

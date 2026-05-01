@@ -11,6 +11,23 @@
     "default": "arknights_operator_aliases.json",
     "hint": "例如：/home/user/arknights_operator_aliases.json"
   },
+  "image_download_retry": {
+    "description": "bilibili wiki 图片下载重试设置",
+    "type": "object",
+    "hint": "用于控制图片获取失败后的最大重试次数和每次重试之间的等待时间",
+    "items": {
+      "max_retries": {
+        "description": "最大重试次数",
+        "type": "int",
+        "default": 2
+      },
+      "retry_interval_seconds": {
+        "description": "重试间隔秒数",
+        "type": "float",
+        "default": 0.5
+      }
+    }
+  },
   "target_size": {
     "description": "角色立绘最后输出的参考大小",
     "type": "int",
