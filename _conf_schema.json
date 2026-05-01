@@ -5,6 +5,12 @@
     "default": "arknights_skins_dict.json",
     "hint": "例如：/home/user/arknights_skins_dict.json"
   },
+  "operator_aliases_path": {
+    "description": "干员别名数据JSON路径(默认使用插件自带数据)",
+    "type": "string",
+    "default": "arknights_operator_aliases.json",
+    "hint": "例如：/home/user/arknights_operator_aliases.json"
+  },
   "target_size": {
     "description": "角色立绘最后输出的参考大小",
     "type": "int",
@@ -115,12 +121,6 @@
     "editor_mode": true,
     "editor_language": "json",
     "editor_theme": "vs-light"
-  },
-  "operator_aliases_path": {
-    "description": "干员别名数据 JSON 路径(默认使用插件自带 arknights_operator_aliases.json)",
-    "type": "string",
-    "default": "arknights_operator_aliases.json",
-    "hint": "例如：/home/user/arknights_operator_aliases.json"
   },
   "renderer_theme": {
     "description": "问答统计图片主题",
