@@ -189,10 +189,11 @@ async def handle_fcc(
     is_correct = exact_alias_match or fuzzy_match_correct
     previous_answer_matched = False
     if is_group and match and group_id is not None:
+        previous_resolved_guess = resolve_alias(guess_text, self.alias_map)
         previous_answer_matched = _is_recent_previous_match_answer(
             self,
             player_state,
-            guess_text,
+            previous_resolved_guess,
         )
 
     logger.debug(

@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Optional
 
+from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 import astrbot.api.message_components as Comp
 from pypinyin import lazy_pinyin, Style
@@ -288,8 +289,14 @@ def load_operator_aliases(path: str | Path) -> dict[str, list[str]]:
     if not alias_path.exists():
         return {}
 
-    with alias_path.open("r", encoding="utf-8") as file:
-        raw_data = json.load(file)
+    try:
+        with alias_path.open("r", encoding="utf-8") as file:
+            raw_data = json.load(file)
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning(
+            f"[Mrfzccl] Failed to load operator aliases from {alias_path}: {exc}"
+        )
+        return {}
 
     if not isinstance(raw_data, dict):
         return {}
@@ -307,8 +314,9 @@ def load_operator_aliases(path: str | Path) -> dict[str, list[str]]:
             if normalized_alias and normalized_alias not in normalized_aliases:
                 normalized_aliases.append(normalized_alias)
 
-        if normalized_aliases:
-            alias_data[name.strip()] = normalized_aliases
+        normalized_name = name.strip()
+        if normalized_name and normalized_aliases:
+            alias_data[normalized_name] = normalized_aliases
 
     return alias_data
 
@@ -318,7 +326,11 @@ def is_exact_operator_alias_match(
     """判断 guess 是否正好等于该算子的某一个别名。"""
     if not name or not guess:
         return False
-    return guess in (aliases_by_name or {}).get(name, [])
+    normalized_name = name.strip()
+    normalized_guess = guess.strip()
+    if not normalized_name or not normalized_guess:
+        return False
+    return normalized_guess in (aliases_by_name or {}).get(normalized_name, [])
 
 def get_pinyin(text: str) -> str:
     """获取汉字的拼音（不带声调）"""

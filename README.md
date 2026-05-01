@@ -92,7 +92,7 @@ python scripts/package_plugin.py
 脚本将打包 `git ls-files` 返回的已跟踪文件，默认输出到 `dist/astrbot_plugin_mrfzccl-<version>.zip`。
 
  ## 📊 数据来源 
- - 感谢blibliwiki的立绘资源 
+ - 感谢bilibili wiki的立绘资源 
  - 干员数据基于公开的明日方舟游戏信息 
 
  ## 📄 许可证 
