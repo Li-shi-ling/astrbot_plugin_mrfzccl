@@ -21,8 +21,7 @@ from ..tool import (
     resolve_alias,
 )
 
-
-# 判断是否为正确答案
+# 计算答案匹配细节并返回判题所需的各项指标。
 def _get_answer_match_details(
     self, answer: str, guess: str
 ) -> tuple[float, float, bool, bool]:
@@ -38,7 +37,7 @@ def _get_answer_match_details(
     )
     return similarity, coverage, homophone_match, is_correct
 
-
+# 判断当前输入是否可以视为正确答案。
 def _is_matching_answer(self, answer: str, guess: str) -> bool:
     alias_match_enabled = getattr(self, "enable_operator_alias_match", True)
     if alias_match_enabled and is_exact_operator_alias_match(
@@ -48,8 +47,7 @@ def _is_matching_answer(self, answer: str, guess: str) -> bool:
     _, _, _, is_correct = _get_answer_match_details(self, answer, guess)
     return is_correct
 
-
-# 判断是否为上一个题目的答题
+# 判断当前输入是否命中比赛宽限期内的上一题答案。
 def _is_recent_previous_match_answer(
     self, player_state: dict[str, Any], guess: str
 ) -> bool:
@@ -72,9 +70,17 @@ def _is_recent_previous_match_answer(
     if time.time() - switched_at_ts > grace_period:
         return False
 
-    return _is_matching_answer(self, str(previous_answer), guess)
+    previous_answer_text = str(previous_answer)
+    if _is_matching_answer(self, previous_answer_text, guess):
+        return True
 
+    normalized_guess = resolve_alias(guess, getattr(self, "alias_map", {}))
+    if normalized_guess == guess:
+        return False
 
+    return _is_matching_answer(self, previous_answer_text, normalized_guess)
+
+# 处理 `/fc` 指令并启动一局新的猜题流程。
 async def handle_fc(
     self,
     event: AstrMessageEvent,
@@ -122,7 +128,7 @@ async def handle_fc(
 
     return response
 
-
+# 处理 `/fcc` 指令并完成正式答题判定。
 async def handle_fcc(
     self,
     event: AstrMessageEvent,
@@ -189,11 +195,10 @@ async def handle_fcc(
     is_correct = exact_alias_match or fuzzy_match_correct
     previous_answer_matched = False
     if is_group and match and group_id is not None:
-        previous_resolved_guess = resolve_alias(guess_text, self.alias_map)
         previous_answer_matched = _is_recent_previous_match_answer(
             self,
             player_state,
-            previous_resolved_guess,
+            guess_text,
         )
 
     logger.debug(
@@ -319,7 +324,7 @@ async def handle_fcc(
 
     return responses, match_end_payload
 
-
+# 输出比赛结束后的排行榜结果，优先发送图片。
 async def iter_match_end_leaderboard(
     self,
     event: AstrMessageEvent,
@@ -342,7 +347,7 @@ async def iter_match_end_leaderboard(
     ):
         yield result
 
-
+# 处理 `/fce` 指令并强制结束当前猜题。
 async def handle_fce(
     self,
     event: AstrMessageEvent,
@@ -372,7 +377,7 @@ async def handle_fce(
 
     return responses
 
-
+# 处理 `/fct` 指令并发送下一条提示。
 async def handle_fct(
     self,
     event: AstrMessageEvent,
@@ -401,7 +406,7 @@ async def handle_fct(
 
     return response
 
-
+# 处理 `/fcw` 指令并一次性发送三条提示。
 async def handle_fcw(
     self,
     event: AstrMessageEvent,

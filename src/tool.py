@@ -10,6 +10,7 @@ import astrbot.api.message_components as Comp
 from pypinyin import lazy_pinyin, Style
 from datetime import datetime
 
+# 计算去重后字符集合的覆盖率。
 def calculate_char_coverage_set(correct_name: str, guess_text: str) -> float:
     """
     计算guess_text包含correct_name中字符的比例（去重版本）
@@ -34,6 +35,7 @@ def calculate_char_coverage_set(correct_name: str, guess_text: str) -> float:
 
     return coverage
 
+# 计算保留重复字符次数的覆盖率。
 def calculate_char_coverage_counter(correct_name: str, guess_text: str) -> float:
     """
     计算guess_text包含correct_name中字符的比例（不去重版本）
@@ -63,6 +65,7 @@ def calculate_char_coverage_counter(correct_name: str, guess_text: str) -> float
 
     return coverage
 
+# 生成正确次数排行榜的文本内容。
 def generate_correct_leaderboard_text(users: Iterable[Any], summary: Optional[Mapping[str, Any]] = None) -> str:
     """生成正确量排行榜文本"""
     users = list(users or [])
@@ -100,6 +103,7 @@ def generate_correct_leaderboard_text(users: Iterable[Any], summary: Optional[Ma
 
     return message
 
+# 生成错误次数排行榜的文本内容。
 def generate_wrong_leaderboard_text(users: Iterable[Any]) -> str:
     """生成错误个数排行榜文本"""
     users = list(users or [])
@@ -131,6 +135,7 @@ def generate_wrong_leaderboard_text(users: Iterable[Any]) -> str:
 
     return message
 
+# 生成提示使用次数排行榜的文本内容。
 def generate_hints_leaderboard_text(users: Iterable[Any]) -> str:
     """生成提示次数排行榜文本"""
     users = list(users or [])
@@ -162,6 +167,7 @@ def generate_hints_leaderboard_text(users: Iterable[Any]) -> str:
 
     return message
 
+# 生成比赛排行榜的文本内容。
 def generate_match_leaderboard_text(match_name: str, participants: Iterable[Any], ended: bool = False) -> str:
     """生成比赛排行榜文本（图片生成失败时的回退）"""
     participants = list(participants or [])
@@ -187,6 +193,7 @@ def generate_match_leaderboard_text(match_name: str, participants: Iterable[Any]
         message += f"{i}. {user_name}: {correct}对 {wrong}错 {score_str}分\n"
     return message
 
+# 生成人物名片或个人统计文本。
 def generate_user_profile_text(user_stats: Any, rank_info: Mapping[str, Any], honors=None, user_id: str | None = None) -> str:
     """生成用户个人信息文本"""
     honors = list(honors or [])
@@ -241,6 +248,7 @@ def generate_user_profile_text(user_stats: Any, rank_info: Mapping[str, Any], ho
 
     return message
 
+# 优先发送图片结果，失败时回退到文本结果。
 async def generate_image_or_fallback(
     event: AstrMessageEvent,
     generate_image_func: Callable[..., Any],
@@ -263,6 +271,7 @@ async def generate_image_or_fallback(
         text_message = generate_text_func(*args, **kwargs)
         yield event.plain_result(f"图片生成失败，使用文本模式显示\n错误: {str(render_error)}\n\n{text_message}")
 
+# 解析旧版字符串格式的别名映射配置。
 def parse_aliases(alias_str: str) -> dict[str, str]:
     """解析别名配置字符串为映射表：别名:正名,别名:正名"""
     alias_map: dict[str, str] = {}
@@ -279,7 +288,7 @@ def parse_aliases(alias_str: str) -> dict[str, str]:
         alias_map[alias] = name
     return alias_map
 
-
+# 解析 JSON 文本格式的别名映射配置。
 def parse_aliases_json_text(alias_text: str) -> dict[str, str]:
     """Parse a JSON object alias config into alias -> canonical name mapping."""
     if not alias_text:
@@ -305,7 +314,7 @@ def parse_aliases_json_text(alias_text: str) -> dict[str, str]:
         alias_map[normalized_alias] = normalized_name
     return alias_map
 
-
+# 合并多份别名映射并让后者覆盖前者。
 def merge_alias_maps(*alias_maps: Mapping[str, str]) -> dict[str, str]:
     """Merge multiple alias maps with later maps overriding earlier ones."""
     merged: dict[str, str] = {}
@@ -316,10 +325,12 @@ def merge_alias_maps(*alias_maps: Mapping[str, str]) -> dict[str, str]:
             merged[alias] = name
     return merged
 
+# 将输入名称解析为正式干员名。
 def resolve_alias(name: str, alias_map: Mapping[str, str]) -> str:
     """将别名解析为正名（若不存在则返回原值）"""
     return (alias_map or {}).get(name, name)
 
+# 从 JSON 文件加载按真名索引的干员别名表。
 def load_operator_aliases(path: str | Path) -> dict[str, list[str]]:
     """加载算子别名表，按规范算子名建立索引。"""
     alias_path = Path(path)
@@ -357,6 +368,7 @@ def load_operator_aliases(path: str | Path) -> dict[str, list[str]]:
 
     return alias_data
 
+# 判断输入是否精确命中某个干员的别名。
 def is_exact_operator_alias_match(
     name: str, guess: str, aliases_by_name: Mapping[str, list[str]]
 ) -> bool:
@@ -369,16 +381,19 @@ def is_exact_operator_alias_match(
         return False
     return normalized_guess in (aliases_by_name or {}).get(normalized_name, [])
 
+# 获取文本对应的无声调拼音串。
 def get_pinyin(text: str) -> str:
     """获取汉字的拼音（不带声调）"""
     return "".join(lazy_pinyin(text, style=Style.NORMAL))
 
+# 判断两个文本是否满足同音匹配。
 def check_homophone(correct: str, guess: str, enable_homophone: bool = False) -> bool:
     """检查两个字符串是否同音（基于拼音）"""
     if not enable_homophone:
         return False
     return get_pinyin(correct) == get_pinyin(guess)
 
+# 检查用户是否超过每日游戏次数限制。
 def check_daily_limit(user_id: str, daily_counter: dict, daily_limit: int) -> bool:
     """检查并更新每日计数器，返回是否允许继续游戏"""
     if daily_limit < 0:
@@ -391,6 +406,7 @@ def check_daily_limit(user_id: str, daily_counter: dict, daily_limit: int) -> bo
     daily_counter[key] = count + 1
     return True
 
+# 判断指定用户是否存在激活中的游戏状态。
 def has_active_game(player: Mapping[str, Any], user_id: str) -> bool:
     """检查用户是否有活跃游戏"""
     data = (player or {}).get(user_id)
