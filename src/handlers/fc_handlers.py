@@ -17,6 +17,7 @@ from ..tool import (
     generate_image_or_fallback,
     generate_match_leaderboard_text,
     has_active_game,
+    is_exact_operator_alias_match,
     resolve_alias,
 )
 
@@ -39,6 +40,11 @@ def _get_answer_match_details(
 
 
 def _is_matching_answer(self, answer: str, guess: str) -> bool:
+    alias_match_enabled = getattr(self, "enable_operator_alias_match", True)
+    if alias_match_enabled and is_exact_operator_alias_match(
+        answer, guess, getattr(self, "operator_aliases_by_name", {})
+    ):
+        return True
     _, _, _, is_correct = _get_answer_match_details(self, answer, guess)
     return is_correct
 
@@ -166,23 +172,31 @@ async def handle_fcc(
 
     # 解析别名（将用户输入的别名转换为正式名称）
     resolved_guess = resolve_alias(guess_text, self.alias_map)
+    exact_alias_match = is_exact_operator_alias_match(
+        correct_name,
+        guess_text,
+        getattr(self, "operator_aliases_by_name", {}),
+    )
+    if not getattr(self, "enable_operator_alias_match", True):
+        exact_alias_match = False
 
     # 计算相似度
-    similarity, calculate, homophone_match, is_correct = _get_answer_match_details(
+    similarity, calculate, homophone_match, fuzzy_match_correct = _get_answer_match_details(
         self,
         correct_name,
         resolved_guess,
     )
+    is_correct = exact_alias_match or fuzzy_match_correct
     previous_answer_matched = False
     if is_group and match and group_id is not None:
         previous_answer_matched = _is_recent_previous_match_answer(
             self,
             player_state,
-            resolved_guess,
+            guess_text,
         )
 
     logger.debug(
-        f"[答题判断] 正确答案: {correct_name}, 用户回答: {resolved_guess}, 相似度: {similarity:.2f}, "
+        f"[答题判断] 正确答案: {correct_name}, 用户回答: {guess_text}, 解析后: {resolved_guess}, 别名精确匹配: {exact_alias_match}, 相似度: {similarity:.2f}, "
         f"字匹配率: {calculate:.2f}, 同音匹配: {homophone_match}, 阈值: {self.similarity_threshold}/{self.calculate_threshold}, "
         f"结果: {is_correct}"
     )

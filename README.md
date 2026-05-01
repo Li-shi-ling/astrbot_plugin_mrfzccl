@@ -68,6 +68,7 @@ AstrBot 插件：遮挡干员立绘猜名字；支持排行榜、名片、比赛
 - `similarity_threshold`: 相似度阈值（SequenceMatcher）
 - `calculate_threshold`: 字符覆盖率阈值
 - `enable_homophone`: 同音字识别
+- `enable_operator_alias_match`: 是否启用干员别名精确判别
 - `daily_game_limit`: 每日开局次数（0<不限制）
 - `match_question_limit`: 比赛题目上限（0=不限制）
 - `match_time_limit`: 比赛时间上限（分钟；0=不限制）
@@ -77,6 +78,7 @@ AstrBot 插件：遮挡干员立绘猜名字；支持排行榜、名片、比赛
 - `low_weight_characters`: 低权重干员关键词（逗号分隔）
 - `low_weight_ratio`: 低权重干员出现比例
 - `character_aliases`: 别名映射（`别名:正名,...`）
+- `operator_aliases_path`: 干员别名数据 JSON 路径（默认 `arknights_operator_aliases.json`）
 - `renderer_theme`: 排行榜/名片主题
 
  ## 📊 数据来源 

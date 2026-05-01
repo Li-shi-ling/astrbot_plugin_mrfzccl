@@ -212,3 +212,5 @@ AGENTS.md
 .pipeline-workspace
 test
 .idea/
+.omx/
+data/

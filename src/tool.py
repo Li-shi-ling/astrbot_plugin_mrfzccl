@@ -1,5 +1,7 @@
 from collections import Counter
+import json
 import os
+from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Optional
 
 from astrbot.api.event import AstrMessageEvent
@@ -279,6 +281,44 @@ def parse_aliases(alias_str: str) -> dict[str, str]:
 def resolve_alias(name: str, alias_map: Mapping[str, str]) -> str:
     """将别名解析为正名（若不存在则返回原值）"""
     return (alias_map or {}).get(name, name)
+
+def load_operator_aliases(path: str | Path) -> dict[str, list[str]]:
+    """加载算子别名表，按规范算子名建立索引。"""
+    alias_path = Path(path)
+    if not alias_path.exists():
+        return {}
+
+    with alias_path.open("r", encoding="utf-8") as file:
+        raw_data = json.load(file)
+
+    if not isinstance(raw_data, dict):
+        return {}
+
+    alias_data: dict[str, list[str]] = {}
+    for name, aliases in raw_data.items():
+        if not isinstance(name, str) or not isinstance(aliases, list):
+            continue
+
+        normalized_aliases: list[str] = []
+        for alias in aliases:
+            if not isinstance(alias, str):
+                continue
+            normalized_alias = alias.strip()
+            if normalized_alias and normalized_alias not in normalized_aliases:
+                normalized_aliases.append(normalized_alias)
+
+        if normalized_aliases:
+            alias_data[name.strip()] = normalized_aliases
+
+    return alias_data
+
+def is_exact_operator_alias_match(
+    name: str, guess: str, aliases_by_name: Mapping[str, list[str]]
+) -> bool:
+    """判断 guess 是否正好等于该算子的某一个别名。"""
+    if not name or not guess:
+        return False
+    return guess in (aliases_by_name or {}).get(name, [])
 
 def get_pinyin(text: str) -> str:
     """获取汉字的拼音（不带声调）"""
