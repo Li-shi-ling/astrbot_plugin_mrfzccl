@@ -30,11 +30,13 @@ def _get_answer_match_details(
     homophone_match = check_homophone(
         answer, guess, enable_homophone=self.enable_homophone
     )
-    is_correct = (
+    similarity_match = getattr(self, "enable_similarity_match", True) and (
         similarity > self.similarity_threshold
-        or coverage > self.calculate_threshold
-        or homophone_match
     )
+    coverage_match = getattr(self, "enable_character_coverage_match", True) and (
+        coverage > self.calculate_threshold
+    )
+    is_correct = similarity_match or coverage_match or homophone_match
     return similarity, coverage, homophone_match, is_correct
 
 # 判断当前输入是否可以视为正确答案。

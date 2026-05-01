@@ -40,11 +40,23 @@
     "default": 0.4,
     "hint": "(0.-1.) 推荐0.4-0.5"
   },
+  "enable_similarity_match": {
+    "description": "是否启用相似度匹配判题",
+    "type": "bool",
+    "default": true,
+    "hint": "true开启,false关闭"
+  },
   "calculate_threshold": {
     "description": "判断是否正确的阈值,字的准确率(与位置无关仅判断字是否正确),越高判断的要求越高",
     "type": "float",
     "default": 0.5,
     "hint": "(0.-1.) 推荐0.5-0.6"
+  },
+  "enable_character_coverage_match": {
+    "description": "是否启用字符覆盖率匹配判题",
+    "type": "bool",
+    "default": true,
+    "hint": "true开启,false关闭"
   },
   "enable_homophone": {
     "description": "启用同音字识别,例如「银灰」和「银辉」都会被识别为正确",

@@ -1,5 +1,10 @@
 ## 更新日志
 
+### 1.2.18
+- 鉁?鏂板 `enable_similarity_match` 寮€鍏筹紝鍙互鍗曠嫭鎺у埗鐩镐技搴﹀尮閰嶅垽棰?
+- 鉁?鏂板 `enable_character_coverage_match` 寮€鍏筹紝鍙互鍗曠嫭鎺у埗瀛楃瑕嗙洊鐜囧尮閰嶅垽棰?
+- 鉁?鍒ゆ柇娴佺▼璋冩暣涓哄彧鍦ㄥ凡鍚敤鐨勫墠缃垽棰樻柟寮忓叏閮ㄥけ鏁堟椂锛屾墠浼氱户缁娇鐢?LLM 鍏滃簳鍒ら
+
 ### 1.2.17
 - ✅ `llm_judge` 新增显式 `enabled` 开关，关闭时不会触发任何 LLM 判题请求
 - ✅ `llm_judge.model` 改为 `llm_judge.provider_id`，并接入 AstrBot 原生 `select_provider` 选择器

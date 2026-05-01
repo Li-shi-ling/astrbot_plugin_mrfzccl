@@ -71,8 +71,14 @@ class Mrfzccl(Star):
 
         # 从配置文件读取相似度阈值
         self.similarity_threshold = self.Config.get("similarity_threshold", 0.5)
+        self.enable_similarity_match = self.Config.get(
+            "enable_similarity_match", True
+        )
         # 从配置文件读取字符匹配阈值
         self.calculate_threshold = self.Config.get("calculate_threshold", 0.5)
+        self.enable_character_coverage_match = self.Config.get(
+            "enable_character_coverage_match", True
+        )
         # 是否启用同音字匹配
         self.enable_homophone = self.Config.get("enable_homophone", False)
         # 是否启用干员别名精确判题
