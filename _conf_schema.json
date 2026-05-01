@@ -108,7 +108,7 @@
     "hint": "格式: 别名1:正名1,别名2:正名2"
   },
   "character_aliases_json": {
-    "description": "干员别名映射(JSON 格式，更适合人工编辑；会与 character_aliases 合并并自动去重)",
+    "description": "干员别名映射(会与旧格式合并)",
     "type": "text",
     "hint": "输入 JSON 对象，例如: {\"小刻\": \"刻俄柏\", \"小羊\": \"艾雅法拉\"}",
     "default": "{\n\t\"小刻\": \"刻俄柏\",\n\t\"小羊\": \"艾雅法拉\",\n\t\"42\": \"史尔特尔\"\n}",
