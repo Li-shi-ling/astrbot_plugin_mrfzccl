@@ -1,5 +1,12 @@
 ## 更新日志
 
+### 1.2.19
+- ✅ 修复比赛模式下“上一题答案”超过宽限期后仍可能触发 LLM 兜底判题的问题
+- ✅ 为 `llm_judge.max_retries` 增加硬上限，避免异常配置导致过多重试
+- ✅ 优化 LLM 判题日志与会话标识，将 `unified_msg_origin` 写入调试链路
+- ✅ 提升 LLM 判题结果解析兼容性，支持带简单标点或 JSON 布尔包装的 `True` / `False` 输出
+- ✅ 统一 LLM 重试日志中的尝试次数显示格式
+
 ### 1.2.18
 - ✅ 新增 `enable_similarity_match` 开关，可以单独控制相似度匹配判题
 - ✅ 新增 `enable_character_coverage_match` 开关，可以单独控制字符覆盖率匹配判题

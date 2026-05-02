@@ -83,6 +83,26 @@ def _is_recent_previous_match_answer(
     return _is_matching_answer(self, previous_answer_text, normalized_guess)
 
 
+def _can_check_recent_previous_match_answer(self, player_state: dict[str, Any]) -> bool:
+    previous_answer = player_state.get("previous_answer")
+    switched_at = player_state.get("previous_answer_switched_at")
+    if not previous_answer or switched_at is None:
+        return False
+
+    grace_period = max(
+        0.0, float(getattr(self, "match_answer_grace_period", 3.0) or 0.0)
+    )
+    if grace_period <= 0:
+        return False
+
+    try:
+        switched_at_ts = float(switched_at)
+    except (TypeError, ValueError):
+        return False
+
+    return time.time() - switched_at_ts <= grace_period
+
+
 async def _is_recent_previous_match_answer_with_llm(
     self,
     player_state: dict[str, Any],
@@ -91,6 +111,8 @@ async def _is_recent_previous_match_answer_with_llm(
 ) -> bool:
     if _is_recent_previous_match_answer(self, player_state, guess):
         return True
+    if not _can_check_recent_previous_match_answer(self, player_state):
+        return False
 
     previous_answer = player_state.get("previous_answer")
     if not previous_answer:

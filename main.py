@@ -36,6 +36,8 @@ import time
 import os
 import re
 
+LLM_JUDGE_MAX_RETRIES_HARD_LIMIT = 5
+
 
 # 注册插件，指定插件名、作者、描述和版本号
 @register("mrfzccl", "Lishining", "你知道的,我一直是明日方舟高手", "1.0.0")
@@ -105,9 +107,19 @@ class Mrfzccl(Star):
         )
         self.llm_judge_debug = bool(llm_judge.get("debug", False))
         self.llm_judge_enable_retry = bool(llm_judge.get("enable_retry", False))
+        configured_llm_judge_max_retries = int(llm_judge.get("max_retries", 0) or 0)
+        if configured_llm_judge_max_retries > LLM_JUDGE_MAX_RETRIES_HARD_LIMIT:
+            logger.warning(
+                "[llm_judge] max_retries=%s exceeds hard limit %s, clamping",
+                configured_llm_judge_max_retries,
+                LLM_JUDGE_MAX_RETRIES_HARD_LIMIT,
+            )
         self.llm_judge_max_retries = max(
             0,
-            int(llm_judge.get("max_retries", 0) or 0),
+            min(
+                configured_llm_judge_max_retries,
+                LLM_JUDGE_MAX_RETRIES_HARD_LIMIT,
+            ),
         )
         self.llm_judge_retry_interval_seconds = max(
             0.0,
@@ -967,9 +979,17 @@ class Mrfzccl(Star):
 
     def _parse_llm_judge_result(self, completion_text: str) -> bool | None:
         text = str(completion_text or "").strip().lower()
+        if not text:
+            return None
+        text = re.sub(r"^[`\"'\s]+|[`\"'\s]+$", "", text)
+        text = re.sub(r"[.。!！?？]+$", "", text)
         if text == "true":
             return True
         if text == "false":
+            return False
+        if re.fullmatch(r'\{\s*"(result|answer|correct)"\s*:\s*true\s*\}', text):
+            return True
+        if re.fullmatch(r'\{\s*"(result|answer|correct)"\s*:\s*false\s*\}', text):
             return False
         return None
 
@@ -993,10 +1013,13 @@ class Mrfzccl(Star):
             return False
 
         prompt = self._build_llm_judge_prompt(answer, guess)
+        msg_origin = str(unified_msg_origin or "").strip() or "unknown"
+        session_id = f"mrfzccl-judge-{msg_origin}-{time.time_ns()}"
         if bool(getattr(self, "llm_judge_debug", False)):
             logger.info(
-                "[llm_judge] 输入 provider_id=%s answer=%s guess=%s prompt=%s",
+                "[llm_judge] 输入 provider_id=%s msg_origin=%s answer=%s guess=%s prompt=%s",
                 provider_id,
+                msg_origin,
                 answer,
                 guess,
                 prompt,
@@ -1012,11 +1035,15 @@ class Mrfzccl(Star):
             try:
                 response = await provider.text_chat(
                     prompt=prompt,
-                    session_id=f"mrfzccl-judge-{time.time_ns()}",
+                    session_id=session_id,
                 )
                 completion_text = str(getattr(response, "completion_text", "") or "")
                 if bool(getattr(self, "llm_judge_debug", False)):
-                    logger.info("[llm_judge] 输出 raw_completion=%s", completion_text)
+                    logger.info(
+                        "[llm_judge] 输出 msg_origin=%s raw_completion=%s",
+                        msg_origin,
+                        completion_text,
+                    )
                 result = self._parse_llm_judge_result(
                     completion_text
                 )
@@ -1035,7 +1062,7 @@ class Mrfzccl(Star):
                     getattr(self, "llm_judge_retry_interval_seconds", 0.0) or 0.0
                 )
                 logger.warning(
-                    f"[llm_judge] 判题失败，准备重试 ({attempt}/{max_attempts - 1}): {exc}"
+                    f"[llm_judge] 判题失败，准备重试 ({attempt}/{max_attempts}): {exc}"
                 )
                 if retry_interval > 0:
                     await asyncio.sleep(retry_interval)
