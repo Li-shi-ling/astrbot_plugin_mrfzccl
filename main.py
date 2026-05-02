@@ -5,6 +5,7 @@ from astrbot.api import AstrBotConfig, logger
 from astrbot.api.provider import Provider
 from astrbot.api.star import StarTools
 from astrbot.core.utils.astrbot_path import get_astrbot_temp_path
+from astrbot.api.event.filter import EventMessageType
 
 from .src.QnAStatsRenderer import QnAStatsRenderer
 from .src.tool import (
@@ -449,6 +450,10 @@ class Mrfzccl(Star):
                 yield result
         finally:
             event.message_str = original_message
+
+    @filter.event_message_type(EventMessageType.ALL)
+    async def other_fcc(self, event: AstrMessageEvent):
+        pass
 
     # ========== ccl 相关指令 ==========
     # 创建命令组ccl
