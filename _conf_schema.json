@@ -40,11 +40,23 @@
     "default": 0.4,
     "hint": "(0.-1.) 推荐0.4-0.5"
   },
+  "enable_similarity_match": {
+    "description": "是否启用相似度匹配判题",
+    "type": "bool",
+    "default": true,
+    "hint": "true开启,false关闭"
+  },
   "calculate_threshold": {
     "description": "判断是否正确的阈值,字的准确率(与位置无关仅判断字是否正确),越高判断的要求越高",
     "type": "float",
     "default": 0.5,
     "hint": "(0.-1.) 推荐0.5-0.6"
+  },
+  "enable_character_coverage_match": {
+    "description": "是否启用字符覆盖率匹配判题",
+    "type": "bool",
+    "default": true,
+    "hint": "true开启,false关闭"
   },
   "enable_homophone": {
     "description": "启用同音字识别,例如「银灰」和「银辉」都会被识别为正确",
@@ -138,6 +150,53 @@
     "editor_mode": true,
     "editor_language": "json",
     "editor_theme": "vs-light"
+  },
+  "llm_judge": {
+    "description": "LLM 兜底判题配置(仅在前置判题都失败时启用)",
+    "type": "object",
+    "items": {
+      "enabled": {
+        "description": "是否启用",
+        "type": "bool",
+        "default": false
+      },
+      "provider_id": {
+        "description": "模型选择",
+        "type": "string",
+        "default": "",
+        "_special": "select_provider",
+        "hint": "使用 AstrBot 原生模型选择器；留空表示关闭该判题方式"
+      },
+      "prompt": {
+        "description": "模型提示词",
+        "type": "text",
+        "default": "你是明日方舟猜题判题器。已知标准答案：{answer}。用户回答：{guess}。请只判断用户回答是否可以视为该标准答案。只能输出 True 或 False，不要输出其他任何内容。",
+        "hint": "支持 {answer} 和 {guess} 占位符，默认约束模型只输出 True 或 False",
+        "editor_mode": true,
+        "editor_language": "text",
+        "editor_theme": "vs-light"
+      },
+      "debug": {
+        "description": "是否开启调试日志",
+        "type": "bool",
+        "default": false
+      },
+      "enable_retry": {
+        "description": "是否启动重试机制",
+        "type": "bool",
+        "default": false
+      },
+      "max_retries": {
+        "description": "最大重试次数",
+        "type": "int",
+        "default": 0
+      },
+      "retry_interval_seconds": {
+        "description": "重试间隔",
+        "type": "float",
+        "default": 0.0
+      }
+    }
   },
   "renderer_theme": {
     "description": "问答统计图片主题",

@@ -30,11 +30,13 @@ def _get_answer_match_details(
     homophone_match = check_homophone(
         answer, guess, enable_homophone=self.enable_homophone
     )
-    is_correct = (
+    similarity_match = getattr(self, "enable_similarity_match", True) and (
         similarity > self.similarity_threshold
-        or coverage > self.calculate_threshold
-        or homophone_match
     )
+    coverage_match = getattr(self, "enable_character_coverage_match", True) and (
+        coverage > self.calculate_threshold
+    )
+    is_correct = similarity_match or coverage_match or homophone_match
     return similarity, coverage, homophone_match, is_correct
 
 # 判断当前输入是否可以视为正确答案。
@@ -79,6 +81,60 @@ def _is_recent_previous_match_answer(
         return False
 
     return _is_matching_answer(self, previous_answer_text, normalized_guess)
+
+
+def _can_check_recent_previous_match_answer(self, player_state: dict[str, Any]) -> bool:
+    previous_answer = player_state.get("previous_answer")
+    switched_at = player_state.get("previous_answer_switched_at")
+    if not previous_answer or switched_at is None:
+        return False
+
+    grace_period = max(
+        0.0, float(getattr(self, "match_answer_grace_period", 3.0) or 0.0)
+    )
+    if grace_period <= 0:
+        return False
+
+    try:
+        switched_at_ts = float(switched_at)
+    except (TypeError, ValueError):
+        return False
+
+    return time.time() - switched_at_ts <= grace_period
+
+
+async def _is_recent_previous_match_answer_with_llm(
+    self,
+    player_state: dict[str, Any],
+    guess: str,
+    unified_msg_origin: str | None = None,
+) -> bool:
+    if _is_recent_previous_match_answer(self, player_state, guess):
+        return True
+    if not _can_check_recent_previous_match_answer(self, player_state):
+        return False
+
+    previous_answer = player_state.get("previous_answer")
+    if not previous_answer:
+        return False
+
+    previous_answer_text = str(previous_answer)
+    if await self.judge_answer_with_llm(
+        previous_answer_text,
+        guess,
+        unified_msg_origin=unified_msg_origin,
+    ):
+        return True
+
+    normalized_guess = resolve_alias(guess, getattr(self, "alias_map", {}))
+    if normalized_guess == guess:
+        return False
+
+    return await self.judge_answer_with_llm(
+        previous_answer_text,
+        normalized_guess,
+        unified_msg_origin=unified_msg_origin,
+    )
 
 # 处理 `/fc` 指令并启动一局新的猜题流程。
 async def handle_fc(
@@ -192,18 +248,26 @@ async def handle_fcc(
         correct_name,
         resolved_guess,
     )
-    is_correct = exact_alias_match or fuzzy_match_correct
+    llm_match_correct = False
+    if not exact_alias_match and not fuzzy_match_correct:
+        llm_match_correct = await self.judge_answer_with_llm(
+            correct_name,
+            guess_text,
+            unified_msg_origin=event.unified_msg_origin,
+        )
+    is_correct = exact_alias_match or fuzzy_match_correct or llm_match_correct
     previous_answer_matched = False
     if is_group and match and group_id is not None:
-        previous_answer_matched = _is_recent_previous_match_answer(
+        previous_answer_matched = await _is_recent_previous_match_answer_with_llm(
             self,
             player_state,
             guess_text,
+            event.unified_msg_origin,
         )
 
     logger.debug(
         f"[答题判断] 正确答案: {correct_name}, 用户回答: {guess_text}, 解析后: {resolved_guess}, 别名精确匹配: {exact_alias_match}, 相似度: {similarity:.2f}, "
-        f"字匹配率: {calculate:.2f}, 同音匹配: {homophone_match}, 阈值: {self.similarity_threshold}/{self.calculate_threshold}, "
+        f"字匹配率: {calculate:.2f}, 同音匹配: {homophone_match}, LLM 判题: {llm_match_correct}, 阈值: {self.similarity_threshold}/{self.calculate_threshold}, "
         f"结果: {is_correct}"
     )
 

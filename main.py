@@ -2,6 +2,7 @@ from astrbot.api.event import MessageChain, filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
 import astrbot.api.message_components as Comp
 from astrbot.api import AstrBotConfig, logger
+from astrbot.api.provider import Provider
 from astrbot.api.star import StarTools
 from astrbot.core.utils.astrbot_path import get_astrbot_temp_path
 
@@ -34,6 +35,8 @@ import json
 import time
 import os
 import re
+
+LLM_JUDGE_MAX_RETRIES_HARD_LIMIT = 5
 
 
 # 注册插件，指定插件名、作者、描述和版本号
@@ -70,8 +73,14 @@ class Mrfzccl(Star):
 
         # 从配置文件读取相似度阈值
         self.similarity_threshold = self.Config.get("similarity_threshold", 0.5)
+        self.enable_similarity_match = self.Config.get(
+            "enable_similarity_match", True
+        )
         # 从配置文件读取字符匹配阈值
         self.calculate_threshold = self.Config.get("calculate_threshold", 0.5)
+        self.enable_character_coverage_match = self.Config.get(
+            "enable_character_coverage_match", True
+        )
         # 是否启用同音字匹配
         self.enable_homophone = self.Config.get("enable_homophone", False)
         # 是否启用干员别名精确判题
@@ -82,6 +91,40 @@ class Mrfzccl(Star):
         image_download_retry = self.Config.get("image_download_retry", {}) or {}
         if not isinstance(image_download_retry, dict):
             image_download_retry = {}
+        llm_judge = self.Config.get("llm_judge", {}) or {}
+        if not isinstance(llm_judge, dict):
+            llm_judge = {}
+        self.llm_judge_enabled = bool(llm_judge.get("enabled", False))
+        self.llm_judge_provider_id = str(
+            llm_judge.get("provider_id", llm_judge.get("model", "")) or ""
+        ).strip()
+        self.llm_judge_prompt = str(
+            llm_judge.get(
+                "prompt",
+                "你是明日方舟猜题判题器。已知标准答案：{answer}。用户回答：{guess}。请只判断用户回答是否可以视为该标准答案。只能输出 True 或 False，不要输出其他任何内容。",
+            )
+            or ""
+        )
+        self.llm_judge_debug = bool(llm_judge.get("debug", False))
+        self.llm_judge_enable_retry = bool(llm_judge.get("enable_retry", False))
+        configured_llm_judge_max_retries = int(llm_judge.get("max_retries", 0) or 0)
+        if configured_llm_judge_max_retries > LLM_JUDGE_MAX_RETRIES_HARD_LIMIT:
+            logger.warning(
+                "[llm_judge] max_retries=%s exceeds hard limit %s, clamping",
+                configured_llm_judge_max_retries,
+                LLM_JUDGE_MAX_RETRIES_HARD_LIMIT,
+            )
+        self.llm_judge_max_retries = max(
+            0,
+            min(
+                configured_llm_judge_max_retries,
+                LLM_JUDGE_MAX_RETRIES_HARD_LIMIT,
+            ),
+        )
+        self.llm_judge_retry_interval_seconds = max(
+            0.0,
+            float(llm_judge.get("retry_interval_seconds", 0.0) or 0.0),
+        )
         self.image_download_max_retries = max(
             0,
             int(
@@ -921,6 +964,111 @@ class Mrfzccl(Star):
         self.operator_aliases_by_name = load_operator_aliases(alias_file)
 
     # 初始化游戏，返回临时文件路径
+    def _build_llm_judge_prompt(self, answer: str, guess: str) -> str:
+        prompt = self.llm_judge_prompt or (
+            "你是明日方舟猜题判题器。已知标准答案：{answer}。用户回答：{guess}。"
+            "请只判断用户回答是否可以视为该标准答案。只能输出 True 或 False，不要输出其他任何内容。"
+        )
+        try:
+            return prompt.format(answer=answer, guess=guess)
+        except Exception:
+            return (
+                f"{prompt}\n标准答案：{answer}\n用户回答：{guess}\n"
+                "只能输出 True 或 False，不要输出其他任何内容。"
+            )
+
+    def _parse_llm_judge_result(self, completion_text: str) -> bool | None:
+        text = str(completion_text or "").strip().lower()
+        if not text:
+            return None
+        text = re.sub(r"^[`\"'\s]+|[`\"'\s]+$", "", text)
+        text = re.sub(r"[.。!！?？]+$", "", text)
+        if text == "true":
+            return True
+        if text == "false":
+            return False
+        if re.fullmatch(r'\{\s*"(result|answer|correct)"\s*:\s*true\s*\}', text):
+            return True
+        if re.fullmatch(r'\{\s*"(result|answer|correct)"\s*:\s*false\s*\}', text):
+            return False
+        return None
+
+    async def judge_answer_with_llm(
+        self,
+        answer: str,
+        guess: str,
+        *,
+        unified_msg_origin: str | None = None,
+    ) -> bool:
+        if not bool(getattr(self, "llm_judge_enabled", False)):
+            return False
+
+        provider_id = str(getattr(self, "llm_judge_provider_id", "") or "").strip()
+        if not provider_id:
+            return False
+
+        provider = self.context.get_provider_by_id(provider_id)
+        if not isinstance(provider, Provider):
+            logger.warning(f"[llm_judge] 未找到 Provider: {provider_id}")
+            return False
+
+        prompt = self._build_llm_judge_prompt(answer, guess)
+        msg_origin = str(unified_msg_origin or "").strip() or "unknown"
+        session_id = f"mrfzccl-judge-{msg_origin}-{time.time_ns()}"
+        if bool(getattr(self, "llm_judge_debug", False)):
+            logger.info(
+                "[llm_judge] 输入 provider_id=%s msg_origin=%s answer=%s guess=%s prompt=%s",
+                provider_id,
+                msg_origin,
+                answer,
+                guess,
+                prompt,
+            )
+        max_attempts = 1 + max(
+            0,
+            int(getattr(self, "llm_judge_max_retries", 0) or 0)
+            if getattr(self, "llm_judge_enable_retry", False)
+            else 0,
+        )
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                response = await provider.text_chat(
+                    prompt=prompt,
+                    session_id=session_id,
+                )
+                completion_text = str(getattr(response, "completion_text", "") or "")
+                if bool(getattr(self, "llm_judge_debug", False)):
+                    logger.info(
+                        "[llm_judge] 输出 msg_origin=%s raw_completion=%s",
+                        msg_origin,
+                        completion_text,
+                    )
+                result = self._parse_llm_judge_result(
+                    completion_text
+                )
+                if result is None:
+                    raise ValueError(
+                        f"LLM 判题输出不合法: {completion_text}"
+                    )
+                if bool(getattr(self, "llm_judge_debug", False)):
+                    logger.info("[llm_judge] 解析结果 parsed_result=%s", result)
+                return result
+            except Exception as exc:
+                if attempt >= max_attempts:
+                    logger.warning(f"[llm_judge] 判题失败: {exc}")
+                    return False
+                retry_interval = float(
+                    getattr(self, "llm_judge_retry_interval_seconds", 0.0) or 0.0
+                )
+                logger.warning(
+                    f"[llm_judge] 判题失败，准备重试 ({attempt}/{max_attempts}): {exc}"
+                )
+                if retry_interval > 0:
+                    await asyncio.sleep(retry_interval)
+
+        return False
+
     async def fc_init(self, user_id: str) -> bytes | str | None:
         existing = self.player.get(user_id)
         if existing and existing.get("status") in {"active", "loading"}:
