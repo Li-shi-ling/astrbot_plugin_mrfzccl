@@ -27,6 +27,7 @@ def _get_answer_match_details(
 ) -> tuple[float, float, bool, bool]:
     similarity = SequenceMatcher(None, answer, guess).ratio()
     coverage = calculate_char_coverage_set(answer, guess)
+    exact_match = answer == guess
     homophone_match = check_homophone(
         answer, guess, enable_homophone=self.enable_homophone
     )
@@ -36,7 +37,7 @@ def _get_answer_match_details(
     coverage_match = getattr(self, "enable_character_coverage_match", True) and (
         coverage > self.calculate_threshold
     )
-    is_correct = similarity_match or coverage_match or homophone_match
+    is_correct = exact_match or similarity_match or coverage_match or homophone_match
     return similarity, coverage, homophone_match, is_correct
 
 # 判断当前输入是否可以视为正确答案。
@@ -387,6 +388,46 @@ async def handle_fcc(
         )
 
     return responses, match_end_payload
+
+
+async def handle_other_fcc(
+    self,
+    event: AstrMessageEvent,
+    *,
+    user_id: str,
+    sender_id: str,
+    is_group: bool,
+    group_id: str | None,
+) -> tuple[list[Any], tuple[str, list] | None]:
+    """Core logic for plain-text exact-answer hits during an active game."""
+    if not has_active_game(self.player, user_id):
+        return [], None
+
+    raw_message = str(getattr(event, "message_str", "") or "")
+    if not raw_message:
+        return [], None
+
+    player_state = self.player.get(user_id)
+    if not isinstance(player_state, dict):
+        return [], None
+
+    correct_name = str(player_state.get("name", "") or "")
+    if not correct_name or correct_name not in raw_message:
+        return [], None
+
+    original_message = event.message_str
+    event.message_str = f"fcc {correct_name}"
+    try:
+        return await handle_fcc(
+            self,
+            event,
+            user_id=user_id,
+            sender_id=sender_id,
+            is_group=is_group,
+            group_id=group_id,
+        )
+    finally:
+        event.message_str = original_message
 
 # 输出比赛结束后的排行榜结果，优先发送图片。
 async def iter_match_end_leaderboard(

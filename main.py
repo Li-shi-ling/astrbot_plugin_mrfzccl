@@ -453,7 +453,38 @@ class Mrfzccl(Star):
 
     @filter.event_message_type(EventMessageType.ALL)
     async def other_fcc(self, event: AstrMessageEvent):
-        pass
+        message = re.sub(r"\s+", " ", (event.message_str or "").strip())
+        if not message:
+            return
+
+        if message.startswith(("fc ", "fcc", "fce", "fct", "fcw", "/fc", "\\fc")):
+            return
+
+        group_id_raw = event.get_group_id()
+        sender_id = str(event.get_sender_id())
+        is_group = bool(group_id_raw)
+        group_id = str(group_id_raw) if is_group else None
+        user_id = group_id if is_group else sender_id
+
+        room_lock = self._get_match_lock(user_id)
+        async with room_lock:
+            responses, match_end_payload = await fc_handlers.handle_other_fcc(
+                self,
+                event,
+                user_id=user_id,
+                sender_id=sender_id,
+                is_group=is_group,
+                group_id=group_id,
+            )
+
+        for r in responses:
+            yield r
+
+        if match_end_payload:
+            async for result in fc_handlers.iter_match_end_leaderboard(
+                self, event, match_end_payload
+            ):
+                yield result
 
     # ========== ccl 相关指令 ==========
     # 创建命令组ccl
