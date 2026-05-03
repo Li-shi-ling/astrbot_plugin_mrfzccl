@@ -74,9 +74,7 @@ class Mrfzccl(Star):
 
         # 从配置文件读取相似度阈值
         self.similarity_threshold = self.Config.get("similarity_threshold", 0.5)
-        self.enable_similarity_match = self.Config.get(
-            "enable_similarity_match", True
-        )
+        self.enable_similarity_match = self.Config.get("enable_similarity_match", True)
         # 从配置文件读取字符匹配阈值
         self.calculate_threshold = self.Config.get("calculate_threshold", 0.5)
         self.enable_character_coverage_match = self.Config.get(
@@ -87,6 +85,9 @@ class Mrfzccl(Star):
         # 是否启用干员别名精确判题
         self.enable_operator_alias_match = self.Config.get(
             "enable_operator_alias_match", True
+        )
+        self.enable_other_message_exact_match = self.Config.get(
+            "enable_other_message_exact_match", True
         )
         # 下载 bilibili wiki 图片时的重试配置
         image_download_retry = self.Config.get("image_download_retry", {}) or {}
@@ -251,11 +252,11 @@ class Mrfzccl(Star):
             if not os.path.exists(data_path):
                 logger.error(f"[Mrfzccl] 数据文件不存在: {data_path}")
                 return
-            logger.info(f"[Mrfzccl] 数据文件存在，开始读取")
+            logger.info("[Mrfzccl] 数据文件存在，开始读取")
             # 读取并解析JSON数据文件
             with open(data_path, "r", encoding="utf-8") as f:
                 self.data = json.load(f)
-            logger.info(f"[Mrfzccl] JSON解析成功")
+            logger.info("[Mrfzccl] JSON解析成功")
             if not isinstance(self.data, dict):
                 logger.error("[Mrfzccl] 数据文件格式错误: 应为字典类型")
                 return
@@ -453,6 +454,9 @@ class Mrfzccl(Star):
 
     @filter.event_message_type(EventMessageType.ALL)
     async def other_fcc(self, event: AstrMessageEvent):
+        if not getattr(self, "enable_other_message_exact_match", True):
+            return
+
         message = re.sub(r"\s+", " ", (event.message_str or "").strip())
         if not message:
             return
@@ -985,7 +989,7 @@ class Mrfzccl(Star):
         )
         alias_json_text = self.Config.get(
             "character_aliases_json",
-            '{}',
+            "{}",
         )
         self.alias_map = merge_alias_maps(
             parse_aliases(alias_str),
@@ -1080,13 +1084,9 @@ class Mrfzccl(Star):
                         msg_origin,
                         completion_text,
                     )
-                result = self._parse_llm_judge_result(
-                    completion_text
-                )
+                result = self._parse_llm_judge_result(completion_text)
                 if result is None:
-                    raise ValueError(
-                        f"LLM 判题输出不合法: {completion_text}"
-                    )
+                    raise ValueError(f"LLM 判题输出不合法: {completion_text}")
                 if bool(getattr(self, "llm_judge_debug", False)):
                     logger.info("[llm_judge] 解析结果 parsed_result=%s", result)
                 return result
@@ -1114,14 +1114,14 @@ class Mrfzccl(Star):
             # 提取题目
             question = await self.extract_questions()
             if not question:
-                logger.error(f"[fc_init] 提取题目失败")
+                logger.error("[fc_init] 提取题目失败")
                 self.player.pop(user_id, None)
                 return None
             try:
                 # 从URL获取图片
                 image = await self.get_image_from_url(question["url"])
                 if not image:
-                    logger.error(f"[fc_init] 获取图片失败")
+                    logger.error("[fc_init] 获取图片失败")
                     self.player.pop(user_id, None)
                     return None
             except Exception as e:

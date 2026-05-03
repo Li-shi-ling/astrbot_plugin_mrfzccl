@@ -70,6 +70,12 @@
     "default": true,
     "hint": "true开启,false关闭"
   },
+  "enable_other_message_exact_match": {
+    "description": "是否启用任意消息精确包含答案判题",
+    "type": "bool",
+    "default": true,
+    "hint": "开启后,游戏期间普通消息只要精确包含正确答案即可判对"
+  },
   "easy_probability": {
     "description": "简单难度概率(0-1)",
     "type": "float",

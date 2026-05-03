@@ -9,7 +9,9 @@ class UserQnAStats(SQLModel, table=True):
     __tablename__ = "user_qna_stats"
     __table_args__ = {"extend_existing": True}
 
-    id: Optional[int] = Field(default=None, primary_key=True, description="主键ID，自增唯一标识")
+    id: Optional[int] = Field(
+        default=None, primary_key=True, description="主键ID，自增唯一标识"
+    )
     user_id: str = Field(index=True, description="用户ID")
     user_name: str = Field(index=True, description="用户名称")
     correct_count: int = Field(default=0, description="答对次数")
@@ -21,6 +23,7 @@ class UserQnAStats(SQLModel, table=True):
 
 class Match(SQLModel, table=True):
     """比赛表"""
+
     __tablename__ = "match"
     __table_args__ = {"extend_existing": True}
 
@@ -37,6 +40,7 @@ class Match(SQLModel, table=True):
 
 class MatchParticipant(SQLModel, table=True):
     """比赛参与者表"""
+
     __tablename__ = "match_participant"
     __table_args__ = {"extend_existing": True}
 
@@ -52,6 +56,7 @@ class MatchParticipant(SQLModel, table=True):
 
 class MatchHonor(SQLModel, table=True):
     """比赛荣誉表"""
+
     __tablename__ = "match_honor"
     __table_args__ = {"extend_existing": True}
 

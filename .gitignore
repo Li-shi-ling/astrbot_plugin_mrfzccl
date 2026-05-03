@@ -216,3 +216,7 @@ test
 data/
 test-output/
 日志/
+.tmp/
+.pytest-tmp/
+.uv-cache/
+pytest*

@@ -68,12 +68,22 @@ class DBManager:
 
     # 索引创建 SQL
     _CREATE_INDEX_SQL = [
-        text("CREATE INDEX IF NOT EXISTS idx_user_qna_stats_user_id ON user_qna_stats(user_id)"),
-        text("CREATE INDEX IF NOT EXISTS idx_user_qna_stats_user_name ON user_qna_stats(user_name)"),
+        text(
+            "CREATE INDEX IF NOT EXISTS idx_user_qna_stats_user_id ON user_qna_stats(user_id)"
+        ),
+        text(
+            "CREATE INDEX IF NOT EXISTS idx_user_qna_stats_user_name ON user_qna_stats(user_name)"
+        ),
         text("CREATE INDEX IF NOT EXISTS idx_match_group_id ON match(group_id)"),
-        text("CREATE INDEX IF NOT EXISTS idx_match_participant_match_id ON match_participant(match_id)"),
-        text("CREATE INDEX IF NOT EXISTS idx_match_participant_user_id ON match_participant(user_id)"),
-        text("CREATE INDEX IF NOT EXISTS idx_match_honor_user_id ON match_honor(user_id)"),
+        text(
+            "CREATE INDEX IF NOT EXISTS idx_match_participant_match_id ON match_participant(match_id)"
+        ),
+        text(
+            "CREATE INDEX IF NOT EXISTS idx_match_participant_user_id ON match_participant(user_id)"
+        ),
+        text(
+            "CREATE INDEX IF NOT EXISTS idx_match_honor_user_id ON match_honor(user_id)"
+        ),
     ]
 
     def __init__(self, db_path: str):

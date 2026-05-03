@@ -21,6 +21,7 @@ from ..tool import (
     resolve_alias,
 )
 
+
 # 计算答案匹配细节并返回判题所需的各项指标。
 def _get_answer_match_details(
     self, answer: str, guess: str
@@ -40,6 +41,7 @@ def _get_answer_match_details(
     is_correct = exact_match or similarity_match or coverage_match or homophone_match
     return similarity, coverage, homophone_match, is_correct
 
+
 # 判断当前输入是否可以视为正确答案。
 def _is_matching_answer(self, answer: str, guess: str) -> bool:
     alias_match_enabled = getattr(self, "enable_operator_alias_match", True)
@@ -49,6 +51,7 @@ def _is_matching_answer(self, answer: str, guess: str) -> bool:
         return True
     _, _, _, is_correct = _get_answer_match_details(self, answer, guess)
     return is_correct
+
 
 # 判断当前输入是否命中比赛宽限期内的上一题答案。
 def _is_recent_previous_match_answer(
@@ -137,6 +140,7 @@ async def _is_recent_previous_match_answer_with_llm(
         unified_msg_origin=unified_msg_origin,
     )
 
+
 # 处理 `/fc` 指令并启动一局新的猜题流程。
 async def handle_fc(
     self,
@@ -184,6 +188,7 @@ async def handle_fc(
             response = event.plain_result("游戏初始化失败，请稍后重试")
 
     return response
+
 
 # 处理 `/fcc` 指令并完成正式答题判定。
 async def handle_fcc(
@@ -429,6 +434,7 @@ async def handle_other_fcc(
     finally:
         event.message_str = original_message
 
+
 # 输出比赛结束后的排行榜结果，优先发送图片。
 async def iter_match_end_leaderboard(
     self,
@@ -451,6 +457,7 @@ async def iter_match_end_leaderboard(
         ),
     ):
         yield result
+
 
 # 处理 `/fce` 指令并强制结束当前猜题。
 async def handle_fce(
@@ -482,6 +489,7 @@ async def handle_fce(
 
     return responses
 
+
 # 处理 `/fct` 指令并发送下一条提示。
 async def handle_fct(
     self,
@@ -510,6 +518,7 @@ async def handle_fct(
         )
 
     return response
+
 
 # 处理 `/fcw` 指令并一次性发送三条提示。
 async def handle_fcw(
