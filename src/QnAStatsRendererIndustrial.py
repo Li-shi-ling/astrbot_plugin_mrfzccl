@@ -1,5 +1,6 @@
 from .QnAStatsRenderer import QnAStatsRenderer
 
+
 class QnAStatsRendererIndustrial(QnAStatsRenderer):
     """
     工业（深色）主题渲染器。

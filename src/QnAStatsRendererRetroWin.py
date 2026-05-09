@@ -1,5 +1,6 @@
 from .QnAStatsRenderer import QnAStatsRenderer
 
+
 class QnAStatsRendererRetroWin(QnAStatsRenderer):
     """
     复古 Win / 像素风主题渲染器。

@@ -249,10 +249,12 @@ async def handle_fcc(
         exact_alias_match = False
 
     # 计算相似度
-    similarity, calculate, homophone_match, fuzzy_match_correct = _get_answer_match_details(
-        self,
-        correct_name,
-        resolved_guess,
+    similarity, calculate, homophone_match, fuzzy_match_correct = (
+        _get_answer_match_details(
+            self,
+            correct_name,
+            resolved_guess,
+        )
     )
     llm_match_correct = False
     if not exact_alias_match and not fuzzy_match_correct:

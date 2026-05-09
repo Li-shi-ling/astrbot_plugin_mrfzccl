@@ -417,6 +417,7 @@ class Mrfzccl(Star):
         if response is not None:
             yield response
 
+    # 清洗ffc消息,转变为指令
     def _normalize_compact_fc_command(self, message_str: str) -> str | None:
         message = re.sub(r"\s+", " ", (message_str or "").strip())
         if not message:
@@ -435,6 +436,7 @@ class Mrfzccl(Star):
 
         return f"{command} {argument}"
 
+    # 监听符合fcc的指令,防止误触发
     @filter.regex(r"^fcc\S+$")
     async def fcregex(self, event: AstrMessageEvent):
         if not getattr(event, "is_at_or_wake_command", False):
