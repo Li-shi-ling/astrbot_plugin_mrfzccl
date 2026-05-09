@@ -15,6 +15,7 @@ from .src.tool import (
     merge_alias_maps,
     parse_aliases,
     parse_aliases_json_text,
+    normalize_compact_fc_command,
 )
 from .src.db.repo import UserQnARepo, MatchRepo
 from .src.db.database import DBManager
@@ -417,32 +418,14 @@ class Mrfzccl(Star):
         if response is not None:
             yield response
 
-    # 清洗ffc消息,转变为指令
-    def _normalize_compact_fc_command(self, message_str: str) -> str | None:
-        message = re.sub(r"\s+", " ", (message_str or "").strip())
-        if not message:
-            return None
-
-        match = re.fullmatch(r"(fcc)(\S+)", message)
-        if not match:
-            return None
-
-        command, argument = match.groups()
-        if len(argument) > 16:
-            return None
-
-        if re.search(r"[，。！？、,.!?/\\\\]", argument):
-            return None
-
-        return f"{command} {argument}"
-
     # 监听符合fcc的指令,防止误触发
     @filter.regex(r"^fcc\S+$")
     async def fcregex(self, event: AstrMessageEvent):
         if not getattr(event, "is_at_or_wake_command", False):
             return
 
-        normalized = self._normalize_compact_fc_command(event.message_str)
+        # 清理指令
+        normalized = normalize_compact_fc_command(event.message_str)
         if not normalized:
             return
 

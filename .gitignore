@@ -220,3 +220,4 @@ test-output/
 .pytest-tmp/
 .uv-cache/
 pytest*
+.pytest-tmp-local/
