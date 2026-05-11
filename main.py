@@ -442,7 +442,8 @@ class Mrfzccl(Star):
         if not getattr(self, "enable_other_message_exact_match", True):
             return
 
-        message = re.sub(r"\s+", " ", (event.message_str or "").strip())
+        raw_message = str(event.message_str or "")
+        message = re.sub(r"\s+", " ", raw_message.strip())
         if not message:
             return
 
@@ -454,6 +455,17 @@ class Mrfzccl(Star):
         is_group = bool(group_id_raw)
         group_id = str(group_id_raw) if is_group else None
         user_id = group_id if is_group else sender_id
+
+        if not has_active_game(self.player, user_id):
+            return
+
+        player_state = self.player.get(user_id)
+        if not isinstance(player_state, dict):
+            return
+
+        correct_name = str(player_state.get("name", "") or "")
+        if not correct_name or correct_name not in raw_message:
+            return
 
         room_lock = self._get_match_lock(user_id)
         async with room_lock:

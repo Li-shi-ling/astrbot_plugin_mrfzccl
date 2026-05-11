@@ -199,6 +199,7 @@ async def handle_fcc(
     sender_id: str,
     is_group: bool,
     group_id: str | None,
+    guess_text_override: str | None = None,
 ) -> tuple[list[Any], tuple[str, list] | None]:
     """Core logic for `/fcc` (expects room lock is held by caller)."""
     responses: list[Any] = []
@@ -223,7 +224,11 @@ async def handle_fcc(
         return responses, match_end_payload
 
     # 提取并清理用户输入的猜测内容
-    guess_text = self.extract_and_sanitize_input(event.message_str, "fcc")
+    guess_text = (
+        str(guess_text_override).strip()
+        if guess_text_override is not None
+        else self.extract_and_sanitize_input(event.message_str, "fcc")
+    )
     if not guess_text:
         responses.append(
             event.chain_result(
@@ -422,19 +427,15 @@ async def handle_other_fcc(
     if not correct_name or correct_name not in raw_message:
         return [], None
 
-    original_message = event.message_str
-    event.message_str = f"fcc {correct_name}"
-    try:
-        return await handle_fcc(
-            self,
-            event,
-            user_id=user_id,
-            sender_id=sender_id,
-            is_group=is_group,
-            group_id=group_id,
-        )
-    finally:
-        event.message_str = original_message
+    return await handle_fcc(
+        self,
+        event,
+        user_id=user_id,
+        sender_id=sender_id,
+        is_group=is_group,
+        group_id=group_id,
+        guess_text_override=correct_name,
+    )
 
 
 # 输出比赛结束后的排行榜结果，优先发送图片。

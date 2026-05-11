@@ -221,3 +221,4 @@ test-output/
 .uv-cache/
 pytest*
 .pytest-tmp-local/
+docs/
