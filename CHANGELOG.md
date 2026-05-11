@@ -13,9 +13,9 @@
 - ✅ 统一 `src/` 下所有模块注释语言为中文，清理残留英文 docstring 和分隔注释
 
 ### 1.2.33
-- Refactor plugin entry into AstrBot registration, lifecycle, and dependency assembly only.
-- Split configuration, runtime, judging, question picking, media, match, and statistics logic into testable `core/`, `gameplay/`, `images/`, `competition/`, and `stats/` packages.
-- Preserve compatibility wrappers for existing commands, match mode, LLM judging, and image download retry behavior.
+- ✅ 重构插件入口：聚焦于 AstrBot 注册、生命周期与依赖组装
+- ✅ 将配置、运行时、判题、选题、图片、比赛、统计逻辑拆分为独立模块（`core/`、`gameplay/`、`images/`、`competition/`、`stats/`）
+- ✅ 保留现有指令、比赛模式、LLM 判题、图片下载重试等行为的兼容适配层
 
 ### 1.2.32
 - ✅ 移除旧版 `QnAStatsRenderer*` 兼容入口，统一从 `src/rendering` 使用渲染模块
