@@ -211,9 +211,9 @@
     "hint": "可选：light(浅色)、industrial(深色)、retro_win(复古Win)"
   },
   "t2i": {
-    "description": "网络 T2I（HTML转图片）服务配置",
+    "description": "网络 T2I 服务配置",
     "type": "object",
-    "hint": "使用远程 T2I 服务渲染排行榜/名片图片，无需本地安装 wkhtmltoimage",
+    "hint": "使用远程 T2I 服务渲染排行榜/名片图片，无需本地安装 html2image",
     "items": {
       "enabled": {
         "description": "是否启用网络 T2I 渲染",
@@ -225,13 +225,19 @@
         "description": "T2I 服务地址",
         "type": "string",
         "default": "",
-        "hint": "AstrBot 兼容的 T2I 端点，如 http://127.0.0.1:8000/text2img"
+        "hint": "AstrBot 兼容的 T2I 端点，如 http://127.0.0.1:8000/text2img/generate 或 http://127.0.0.1:8000"
       },
       "max_concurrent": {
         "description": "最大 T2I 渲染并发数",
         "type": "int",
         "default": 1,
         "hint": "限制同时发起的 T2I 请求数量，保护服务端资源"
+      },
+      "ad": {
+        "description": "我不会使用网络 T2I 服务,有无大手帮我修改一下!",
+        "type": "int",
+        "default": 1083090761,
+        "hint": "QQ群1083090761,救救孩子!这个模板好难改!"
       }
     }
   }
