@@ -5,6 +5,7 @@ from astrbot.api import AstrBotConfig, logger
 from astrbot.api.provider import Provider
 from astrbot.api.star import StarTools
 from astrbot.core.utils.astrbot_path import get_astrbot_temp_path
+from astrbot.api.event.filter import EventMessageType
 
 from .src.QnAStatsRenderer import QnAStatsRenderer
 from .src.tool import (
@@ -14,6 +15,7 @@ from .src.tool import (
     merge_alias_maps,
     parse_aliases,
     parse_aliases_json_text,
+    normalize_compact_fc_command,
 )
 from .src.db.repo import UserQnARepo, MatchRepo
 from .src.db.database import DBManager
@@ -73,9 +75,7 @@ class Mrfzccl(Star):
 
         # 从配置文件读取相似度阈值
         self.similarity_threshold = self.Config.get("similarity_threshold", 0.5)
-        self.enable_similarity_match = self.Config.get(
-            "enable_similarity_match", True
-        )
+        self.enable_similarity_match = self.Config.get("enable_similarity_match", True)
         # 从配置文件读取字符匹配阈值
         self.calculate_threshold = self.Config.get("calculate_threshold", 0.5)
         self.enable_character_coverage_match = self.Config.get(
@@ -86,6 +86,9 @@ class Mrfzccl(Star):
         # 是否启用干员别名精确判题
         self.enable_operator_alias_match = self.Config.get(
             "enable_operator_alias_match", True
+        )
+        self.enable_other_message_exact_match = self.Config.get(
+            "enable_other_message_exact_match", True
         )
         # 下载 bilibili wiki 图片时的重试配置
         image_download_retry = self.Config.get("image_download_retry", {}) or {}
@@ -250,11 +253,11 @@ class Mrfzccl(Star):
             if not os.path.exists(data_path):
                 logger.error(f"[Mrfzccl] 数据文件不存在: {data_path}")
                 return
-            logger.info(f"[Mrfzccl] 数据文件存在，开始读取")
+            logger.info("[Mrfzccl] 数据文件存在，开始读取")
             # 读取并解析JSON数据文件
             with open(data_path, "r", encoding="utf-8") as f:
                 self.data = json.load(f)
-            logger.info(f"[Mrfzccl] JSON解析成功")
+            logger.info("[Mrfzccl] JSON解析成功")
             if not isinstance(self.data, dict):
                 logger.error("[Mrfzccl] 数据文件格式错误: 应为字典类型")
                 return
@@ -415,30 +418,14 @@ class Mrfzccl(Star):
         if response is not None:
             yield response
 
-    def _normalize_compact_fc_command(self, message_str: str) -> str | None:
-        message = re.sub(r"\s+", " ", (message_str or "").strip())
-        if not message:
-            return None
-
-        match = re.fullmatch(r"(fcc)(\S+)", message)
-        if not match:
-            return None
-
-        command, argument = match.groups()
-        if len(argument) > 16:
-            return None
-
-        if re.search(r"[，。！？、,.!?/\\\\]", argument):
-            return None
-
-        return f"{command} {argument}"
-
+    # 监听符合fcc的指令,防止误触发
     @filter.regex(r"^fcc\S+$")
     async def fcregex(self, event: AstrMessageEvent):
         if not getattr(event, "is_at_or_wake_command", False):
             return
 
-        normalized = self._normalize_compact_fc_command(event.message_str)
+        # 清理指令
+        normalized = normalize_compact_fc_command(event.message_str)
         if not normalized:
             return
 
@@ -449,6 +436,62 @@ class Mrfzccl(Star):
                 yield result
         finally:
             event.message_str = original_message
+
+    @filter.event_message_type(EventMessageType.ALL)
+    async def other_fcc(self, event: AstrMessageEvent):
+        if not getattr(self, "enable_other_message_exact_match", True):
+            return
+
+        raw_message = str(event.message_str or "")
+        message = re.sub(r"\s+", " ", raw_message.strip())
+        if not message:
+            return
+
+        if getattr(event, "is_at_or_wake_command", False):
+            return
+
+        if message.startswith(("/", "\\")):
+            return
+
+        if message.startswith(("fc ", "fcc", "fce", "fct", "fcw")):
+            return
+
+        group_id_raw = event.get_group_id()
+        sender_id = str(event.get_sender_id())
+        is_group = bool(group_id_raw)
+        group_id = str(group_id_raw) if is_group else None
+        user_id = group_id if is_group else sender_id
+
+        if not has_active_game(self.player, user_id):
+            return
+
+        player_state = self.player.get(user_id)
+        if not isinstance(player_state, dict):
+            return
+
+        correct_name = str(player_state.get("name", "") or "")
+        if not correct_name or correct_name not in raw_message:
+            return
+
+        room_lock = self._get_match_lock(user_id)
+        async with room_lock:
+            responses, match_end_payload = await fc_handlers.handle_other_fcc(
+                self,
+                event,
+                user_id=user_id,
+                sender_id=sender_id,
+                is_group=is_group,
+                group_id=group_id,
+            )
+
+        for r in responses:
+            yield r
+
+        if match_end_payload:
+            async for result in fc_handlers.iter_match_end_leaderboard(
+                self, event, match_end_payload
+            ):
+                yield result
 
     # ========== ccl 相关指令 ==========
     # 创建命令组ccl
@@ -949,7 +992,7 @@ class Mrfzccl(Star):
         )
         alias_json_text = self.Config.get(
             "character_aliases_json",
-            '{}',
+            "{}",
         )
         self.alias_map = merge_alias_maps(
             parse_aliases(alias_str),
@@ -1044,13 +1087,9 @@ class Mrfzccl(Star):
                         msg_origin,
                         completion_text,
                     )
-                result = self._parse_llm_judge_result(
-                    completion_text
-                )
+                result = self._parse_llm_judge_result(completion_text)
                 if result is None:
-                    raise ValueError(
-                        f"LLM 判题输出不合法: {completion_text}"
-                    )
+                    raise ValueError(f"LLM 判题输出不合法: {completion_text}")
                 if bool(getattr(self, "llm_judge_debug", False)):
                     logger.info("[llm_judge] 解析结果 parsed_result=%s", result)
                 return result
@@ -1078,14 +1117,14 @@ class Mrfzccl(Star):
             # 提取题目
             question = await self.extract_questions()
             if not question:
-                logger.error(f"[fc_init] 提取题目失败")
+                logger.error("[fc_init] 提取题目失败")
                 self.player.pop(user_id, None)
                 return None
             try:
                 # 从URL获取图片
                 image = await self.get_image_from_url(question["url"])
                 if not image:
-                    logger.error(f"[fc_init] 获取图片失败")
+                    logger.error("[fc_init] 获取图片失败")
                     self.player.pop(user_id, None)
                     return None
             except Exception as e:

@@ -21,12 +21,14 @@ from ..tool import (
     resolve_alias,
 )
 
+
 # 计算答案匹配细节并返回判题所需的各项指标。
 def _get_answer_match_details(
     self, answer: str, guess: str
 ) -> tuple[float, float, bool, bool]:
     similarity = SequenceMatcher(None, answer, guess).ratio()
     coverage = calculate_char_coverage_set(answer, guess)
+    exact_match = answer == guess
     homophone_match = check_homophone(
         answer, guess, enable_homophone=self.enable_homophone
     )
@@ -36,8 +38,9 @@ def _get_answer_match_details(
     coverage_match = getattr(self, "enable_character_coverage_match", True) and (
         coverage > self.calculate_threshold
     )
-    is_correct = similarity_match or coverage_match or homophone_match
+    is_correct = exact_match or similarity_match or coverage_match or homophone_match
     return similarity, coverage, homophone_match, is_correct
+
 
 # 判断当前输入是否可以视为正确答案。
 def _is_matching_answer(self, answer: str, guess: str) -> bool:
@@ -48,6 +51,7 @@ def _is_matching_answer(self, answer: str, guess: str) -> bool:
         return True
     _, _, _, is_correct = _get_answer_match_details(self, answer, guess)
     return is_correct
+
 
 # 判断当前输入是否命中比赛宽限期内的上一题答案。
 def _is_recent_previous_match_answer(
@@ -136,6 +140,7 @@ async def _is_recent_previous_match_answer_with_llm(
         unified_msg_origin=unified_msg_origin,
     )
 
+
 # 处理 `/fc` 指令并启动一局新的猜题流程。
 async def handle_fc(
     self,
@@ -184,6 +189,7 @@ async def handle_fc(
 
     return response
 
+
 # 处理 `/fcc` 指令并完成正式答题判定。
 async def handle_fcc(
     self,
@@ -193,6 +199,7 @@ async def handle_fcc(
     sender_id: str,
     is_group: bool,
     group_id: str | None,
+    guess_text_override: str | None = None,
 ) -> tuple[list[Any], tuple[str, list] | None]:
     """Core logic for `/fcc` (expects room lock is held by caller)."""
     responses: list[Any] = []
@@ -217,7 +224,11 @@ async def handle_fcc(
         return responses, match_end_payload
 
     # 提取并清理用户输入的猜测内容
-    guess_text = self.extract_and_sanitize_input(event.message_str, "fcc")
+    guess_text = (
+        str(guess_text_override).strip()
+        if guess_text_override is not None
+        else self.extract_and_sanitize_input(event.message_str, "fcc")
+    )
     if not guess_text:
         responses.append(
             event.chain_result(
@@ -243,10 +254,12 @@ async def handle_fcc(
         exact_alias_match = False
 
     # 计算相似度
-    similarity, calculate, homophone_match, fuzzy_match_correct = _get_answer_match_details(
-        self,
-        correct_name,
-        resolved_guess,
+    similarity, calculate, homophone_match, fuzzy_match_correct = (
+        _get_answer_match_details(
+            self,
+            correct_name,
+            resolved_guess,
+        )
     )
     llm_match_correct = False
     if not exact_alias_match and not fuzzy_match_correct:
@@ -388,6 +401,43 @@ async def handle_fcc(
 
     return responses, match_end_payload
 
+
+async def handle_other_fcc(
+    self,
+    event: AstrMessageEvent,
+    *,
+    user_id: str,
+    sender_id: str,
+    is_group: bool,
+    group_id: str | None,
+) -> tuple[list[Any], tuple[str, list] | None]:
+    """Core logic for plain-text exact-answer hits during an active game."""
+    if not has_active_game(self.player, user_id):
+        return [], None
+
+    raw_message = str(getattr(event, "message_str", "") or "")
+    if not raw_message:
+        return [], None
+
+    player_state = self.player.get(user_id)
+    if not isinstance(player_state, dict):
+        return [], None
+
+    correct_name = str(player_state.get("name", "") or "")
+    if not correct_name or correct_name not in raw_message:
+        return [], None
+
+    return await handle_fcc(
+        self,
+        event,
+        user_id=user_id,
+        sender_id=sender_id,
+        is_group=is_group,
+        group_id=group_id,
+        guess_text_override=correct_name,
+    )
+
+
 # 输出比赛结束后的排行榜结果，优先发送图片。
 async def iter_match_end_leaderboard(
     self,
@@ -410,6 +460,7 @@ async def iter_match_end_leaderboard(
         ),
     ):
         yield result
+
 
 # 处理 `/fce` 指令并强制结束当前猜题。
 async def handle_fce(
@@ -441,6 +492,7 @@ async def handle_fce(
 
     return responses
 
+
 # 处理 `/fct` 指令并发送下一条提示。
 async def handle_fct(
     self,
@@ -469,6 +521,7 @@ async def handle_fct(
         )
 
     return response
+
 
 # 处理 `/fcw` 指令并一次性发送三条提示。
 async def handle_fcw(
@@ -520,13 +573,17 @@ async def handle_fcw(
 
         response = event.plain_result(msg)
 
-        # 设置提示计数为4（跳过属性提示阶段）
-        self.player[user_id]["fctn"] = 4
-        # 更新用户提示使用次数
-        await self.user_qna_repo.increment_tip_count(
-            user_id=sender_id,
-            user_name=event.get_sender_name(),
-            increment=3,
-        )
+        current_hint_count = int(self.player[user_id].get("fctn", 0) or 0)
+        hint_increment = max(0, 3 - current_hint_count)
+
+        if current_hint_count < 3:
+            self.player[user_id]["fctn"] = 3
+
+        if hint_increment > 0:
+            await self.user_qna_repo.increment_tip_count(
+                user_id=sender_id,
+                user_name=event.get_sender_name(),
+                increment=hint_increment,
+            )
 
     return response
