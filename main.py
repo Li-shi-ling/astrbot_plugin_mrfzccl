@@ -57,7 +57,7 @@ import os
 import re
 
 # 注册插件，指定插件名、作者、描述和版本号
-@register("mrfzccl", "Lishining", "你知道的,我一直是明日方舟高手", "1.0.0")
+@register("mrfzccl", "Lishining", "你知道的,我一直是明日方舟高手", "1.2.34")
 class Mrfzccl(Star):
     _question_candidate_names: np.ndarray
     _question_candidate_urls: List[List[str]]
@@ -70,11 +70,11 @@ class Mrfzccl(Star):
 
     # 插件初始化方法
     def __init__(self, context: Context, config: AstrBotConfig):
+        super().__init__(context, config)  # 调用父类初始化
         self.plugin_dir = Path(__file__).resolve().parent
         self.settings = load_settings(config, self.plugin_dir)
         self.game_runtime = GameRuntime()
         self.match_runtime = MatchRuntime(self.game_runtime)
-        super().__init__(context, config)  # 调用父类初始化
         self.context = context
         self.Config = config  # 保存配置对象
         self.player: Dict[str, Dict[str, Any]] = {}  # 存储玩家游戏状态

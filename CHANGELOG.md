@@ -1,5 +1,9 @@
 ## 更新日志
 
+### 1.2.34
+- ✅ 修复重构后大量注释/docstring/日志的 UTF-8 乱码，恢复为正常中文
+- ✅ 统一 `src/` 下所有模块注释语言为中文，清理残留英文 docstring 和分隔注释
+
 ### 1.2.33
 - Refactor plugin entry into AstrBot registration, lifecycle, and dependency assembly only.
 - Split configuration, runtime, judging, question picking, media, match, and statistics logic into testable `core/`, `gameplay/`, `images/`, `competition/`, and `stats/` packages.
