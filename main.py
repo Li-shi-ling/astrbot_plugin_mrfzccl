@@ -447,7 +447,13 @@ class Mrfzccl(Star):
         if not message:
             return
 
-        if message.startswith(("fc ", "fcc", "fce", "fct", "fcw", "/fc", "\\fc")):
+        if getattr(event, "is_at_or_wake_command", False):
+            return
+
+        if message.startswith(("/", "\\")):
+            return
+
+        if message.startswith(("fc ", "fcc", "fce", "fct", "fcw")):
             return
 
         group_id_raw = event.get_group_id()
