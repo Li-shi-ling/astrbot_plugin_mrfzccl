@@ -7,7 +7,11 @@ from typing import Any
 import astrbot.api.message_components as Comp
 from astrbot.api.event import AstrMessageEvent
 
-from ..tool import generate_image_or_fallback, generate_match_leaderboard_text
+from ..tool import (
+    generate_image_or_fallback,
+    generate_match_leaderboard_text,
+    safe_cancel_task,
+)
 
 
 async def handle_match_help(self, event: AstrMessageEvent) -> AsyncIterator[Any]:
@@ -107,9 +111,9 @@ async def match_start_inlock(self, group_id: str) -> bytes | str | None:
 
     # 取消旧的比赛循环/提示任务，防止重复启动
     if group_id in self.match_next_task:
-        self._safe_cancel_task(self.match_next_task.pop(group_id, None))
+        safe_cancel_task(self.match_next_task.pop(group_id, None))
     if group_id in self.match_loop_task:
-        self._safe_cancel_task(self.match_loop_task.pop(group_id, None))
+        safe_cancel_task(self.match_loop_task.pop(group_id, None))
     self.match_question_state.pop(group_id, None)
 
     # 初始化第一题

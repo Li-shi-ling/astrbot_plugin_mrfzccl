@@ -18,7 +18,9 @@ from ..tool import (
     generate_match_leaderboard_text,
     has_active_game,
     is_exact_operator_alias_match,
+    extract_and_sanitize_input,
     resolve_alias,
+    safe_cancel_task,
 )
 
 
@@ -227,7 +229,7 @@ async def handle_fcc(
     guess_text = (
         str(guess_text_override).strip()
         if guess_text_override is not None
-        else self.extract_and_sanitize_input(event.message_str, "fcc")
+        else extract_and_sanitize_input(event.message_str, "fcc")
     )
     if not guess_text:
         responses.append(
@@ -298,7 +300,7 @@ async def handle_fcc(
             )
             # 取消当前题目的自动提示任务
             if group_id in self.match_next_task:
-                self._safe_cancel_task(self.match_next_task.pop(group_id, None))
+                safe_cancel_task(self.match_next_task.pop(group_id, None))
         elif previous_answer_matched:
             logger.debug(
                 f"[fcc] 忽略上一题宽限期内的迟到正确答案，群ID={group_id}，发送者ID={sender_id}，回答={resolved_guess}"

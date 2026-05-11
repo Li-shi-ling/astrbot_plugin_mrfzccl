@@ -12,20 +12,25 @@ from .src.tool import (
     generate_match_leaderboard_text,
     has_active_game,
     load_operator_aliases,
+    load_image_from_bytes,
+    mask_image_with_random_blocks,
     merge_alias_maps,
+    parse_llm_judge_result,
     parse_aliases,
     parse_aliases_json_text,
+    pil_image_to_bytes,
     normalize_compact_fc_command,
+    resize_to_target,
+    safe_cancel_task,
 )
 from .src.db.repo import UserQnARepo, MatchRepo
 from .src.db.database import DBManager
 from .src.handlers import ccl_admin, ccl_leaderboard, ccl_match, fc_handlers
 
-from typing import Optional, Dict, Any, Tuple, List
+from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta
 from urllib.parse import urlparse
 from pathlib import Path
-from io import BytesIO
 from PIL import Image
 import numpy as np
 import traceback
@@ -679,10 +684,10 @@ class Mrfzccl(Star):
                 loop = asyncio.get_running_loop()
                 # 调整图片大小
                 resized_original = await loop.run_in_executor(
-                    None, self.resize_to_target, original_image, self.target_size
+                    None, resize_to_target, original_image, self.target_size
                 )
                 # 将图片转换为字节流
-                img_bytes = self.pil_image_to_bytes(resized_original)
+                img_bytes = pil_image_to_bytes(resized_original)
                 output_data = event.chain_result(
                     [Comp.Plain("正确答案的完整立绘:"), Comp.Image.fromBytes(img_bytes)]
                 )
@@ -756,23 +761,12 @@ class Mrfzccl(Star):
 
         return removed
 
-    # 安全取消异步任务
-    @staticmethod
-    def _safe_cancel_task(task: asyncio.Task | None) -> None:
-        if not task:
-            return
-        try:
-            if not task.done():
-                task.cancel()
-        except Exception:
-            pass
-
     #  清理指定群组的比赛运行时状态
     def _clear_match_runtime(self, group_id: str) -> None:
         self.match_question_state.pop(group_id, None)
 
         hint_task = self.match_next_task.pop(group_id, None)
-        self._safe_cancel_task(hint_task)
+        safe_cancel_task(hint_task)
 
         loop_task = self.match_loop_task.pop(group_id, None)
         try:
@@ -780,7 +774,7 @@ class Mrfzccl(Star):
         except Exception:
             curr_task = None
         if loop_task is not curr_task:
-            self._safe_cancel_task(loop_task)
+            safe_cancel_task(loop_task)
 
         self.match_sessions.pop(group_id, None)
 
@@ -933,7 +927,7 @@ class Mrfzccl(Star):
 
         # 取消旧任务
         if group_id in self.match_next_task:
-            self._safe_cancel_task(self.match_next_task.pop(group_id, None))
+            safe_cancel_task(self.match_next_task.pop(group_id, None))
 
         self.match_next_task[group_id] = asyncio.create_task(
             self._match_hint_after_delay(group_id, session, delay, float(token))
@@ -1020,22 +1014,6 @@ class Mrfzccl(Star):
                 "只能输出 True 或 False，不要输出其他任何内容。"
             )
 
-    def _parse_llm_judge_result(self, completion_text: str) -> bool | None:
-        text = str(completion_text or "").strip().lower()
-        if not text:
-            return None
-        text = re.sub(r"^[`\"'\s]+|[`\"'\s]+$", "", text)
-        text = re.sub(r"[.。!！?？]+$", "", text)
-        if text == "true":
-            return True
-        if text == "false":
-            return False
-        if re.fullmatch(r'\{\s*"(result|answer|correct)"\s*:\s*true\s*\}', text):
-            return True
-        if re.fullmatch(r'\{\s*"(result|answer|correct)"\s*:\s*false\s*\}', text):
-            return False
-        return None
-
     async def judge_answer_with_llm(
         self,
         answer: str,
@@ -1087,7 +1065,7 @@ class Mrfzccl(Star):
                         msg_origin,
                         completion_text,
                     )
-                result = self._parse_llm_judge_result(completion_text)
+                result = parse_llm_judge_result(completion_text)
                 if result is None:
                     raise ValueError(f"LLM 判题输出不合法: {completion_text}")
                 if bool(getattr(self, "llm_judge_debug", False)):
@@ -1151,14 +1129,14 @@ class Mrfzccl(Star):
 
             # 生成遮罩图片
             result, _ = await loop.run_in_executor(
-                None, self.mask_image_with_random_blocks, image, block_count
+                None, mask_image_with_random_blocks, image, block_count
             )
             # 调整图片大小
             resized = await loop.run_in_executor(
-                None, self.resize_to_target, result, self.target_size
+                None, resize_to_target, result, self.target_size
             )
             # 转换为字节流
-            img_bytes = self.pil_image_to_bytes(resized)
+            img_bytes = pil_image_to_bytes(resized)
             return img_bytes
         except Exception as e:
             logger.error(f"[fc_init] 初始化失败: {e}")
@@ -1333,13 +1311,6 @@ class Mrfzccl(Star):
             logger.error(traceback.format_exc())
             return None
 
-    # 路径处理
-    def _get_absolute_path(self, path: str) -> str:
-        if not path:
-            raise ValueError("路径不能为空")
-        return os.path.abspath(path)
-
-    # 从URL异步获取图片
     async def get_image_from_url(
         self, url: str, timeout: int = 10
     ) -> Optional[Image.Image]:
@@ -1385,7 +1356,7 @@ class Mrfzccl(Star):
                     # 在线程池中加载图片
                     loop = asyncio.get_running_loop()
                     image = await loop.run_in_executor(
-                        None, self._load_image_from_bytes, content
+                        None, load_image_from_bytes, content
                     )
                     return image
             except ValueError:
@@ -1412,155 +1383,6 @@ class Mrfzccl(Star):
             raise last_error
         raise RuntimeError("获取图片失败，未捕获到具体错误")
 
-    # 同步加载图片（在线程池中执行）
-    def _load_image_from_bytes(self, content: bytes) -> Image.Image:
-        image = Image.open(BytesIO(content))
-        # 检查图片格式
-        if image.format not in ["JPEG", "PNG", "GIF", "WEBP", "BMP"]:
-            raise Exception(f"不支持的图片格式: {image.format}")
-        image.load()
-
-        # 检查图片尺寸
-        width, height = image.size
-        if width > 5000 or height > 5000:
-            raise Exception(f"图片尺寸过大: {width}x{height}")
-        return image
-
-    # 提取并清理用户输入
-    def extract_and_sanitize_input(self, text: str, keyword: str) -> str:
-        if not text or not keyword:
-            return ""
-        # 使用正则表达式提取关键词后的内容
-        pattern = rf"{re.escape(keyword)}\s*(.*)"
-        match = re.search(pattern, text)
-        if not match:
-            return ""
-        user_input = match.group(1).strip()
-        # 清理特殊字符
-        cleaned = re.sub(r"[^\u4e00-\u9fa5a-zA-Z0-9\s]", "", user_input)
-        # 限制长度
-        if len(cleaned) > 50:
-            cleaned = cleaned[:50]
-        return cleaned
-
-    # 遮挡图生成
-    def mask_image_with_random_blocks(
-        self,
-        image: Image.Image,
-        block_count: int = 5,
-        mask_color: Tuple[int, int, int] = (0, 0, 0),
-        min_width_percent: int = 10,
-        max_width_percent: int = 20,
-        min_height_percent: int = 10,
-        max_height_percent: int = 20,
-        min_gap_percent: int = 2,
-        avoid_edges: bool = True,
-    ) -> Tuple[Image.Image, List[Tuple[int, int, int, int]]]:
-        """
-        高性能遮罩图片，只露出几个小方块，保持原始游戏逻辑
-
-        参数:
-            image: 原始图片
-            block_count: 遮罩方块数量
-            mask_color: 遮罩颜色(RGB)
-            min/max_width/height_percent: 方块尺寸范围（图片尺寸的百分比）
-            min_gap_percent: 方块间最小间距（图片尺寸的百分比）
-            avoid_edges: 是否避免边缘
-
-        返回:
-            Tuple[遮罩后的图片, 方块坐标列表]
-        """
-        # 转换为RGBA模式（如果不是）
-        if image.mode != "RGBA":
-            original_rgba = image.convert("RGBA")
-        else:
-            original_rgba = image.copy()
-
-        width, height = original_rgba.size
-        arr = np.array(original_rgba)
-
-        # 创建遮罩层，填充 mask_color 并全覆盖
-        mask_layer = np.zeros_like(arr)
-        mask_layer[..., 0] = mask_color[0]
-        mask_layer[..., 1] = mask_color[1]
-        mask_layer[..., 2] = mask_color[2]
-        mask_layer[..., 3] = 255  # 全不透明
-
-        # 计算方块尺寸范围（像素）
-        min_width = max(5, int(width * min_width_percent / 100))
-        max_width = max(min_width, int(width * max_width_percent / 100))
-        min_height = max(5, int(height * min_height_percent / 100))
-        max_height = max(min_height, int(height * max_height_percent / 100))
-        min_gap = int(min(width, height) * min_gap_percent / 100)
-        edge_margin = min_gap if avoid_edges else 0
-
-        blocks = []  # 存储方块坐标
-
-        # 生成随机方块
-        for _ in range(block_count):
-            for attempt in range(100):  # 最多尝试100次
-                # 随机方块尺寸
-                w = random.randint(min_width, max_width)
-                h = random.randint(min_height, max_height)
-                max_x = width - w - edge_margin
-                max_y = height - h - edge_margin
-                if max_x <= edge_margin or max_y <= edge_margin:
-                    break
-
-                # 随机位置
-                x1 = random.randint(edge_margin, max_x)
-                y1 = random.randint(edge_margin, max_y)
-                x2, y2 = x1 + w, y1 + h
-
-                # 检查是否与已有方块冲突
-                conflict = False
-                for bx1, by1, bx2, by2 in blocks:
-                    if not (
-                        x2 + min_gap < bx1
-                        or x1 > bx2 + min_gap
-                        or y2 + min_gap < by1
-                        or y1 > by2 + min_gap
-                    ):
-                        conflict = True
-                        break
-
-                if not conflict:
-                    blocks.append((x1, y1, x2, y2))
-                    mask_layer[y1:y2, x1:x2, 3] = 0  # 方块区域透明
-                    break
-
-        # alpha 合成：遮罩层覆盖原图
-        alpha = mask_layer[..., 3:4] / 255.0
-        result_arr = arr * (1 - alpha) + mask_layer * alpha
-        result_arr = result_arr.astype(np.uint8)
-        result = Image.fromarray(result_arr, "RGBA")
-        return result, blocks
-
-    # 按比例缩放图像，保持宽高比
-    def resize_to_target(self, image: Image.Image, target_size: int) -> Image.Image:
-        if target_size <= 0:
-            target_size = 800
-        w, h = image.size
-        # 根据宽高比例计算新尺寸
-        if w >= h:
-            new_w = target_size
-            new_h = int(target_size * h / w)
-        else:
-            new_h = target_size
-            new_w = int(target_size * w / h)
-        # 确保最小尺寸
-        new_w = max(new_w, 100)
-        new_h = max(new_h, 100)
-        # 使用LANCZOS重采样算法（高质量）
-        return image.resize((new_w, new_h), Image.Resampling.LANCZOS)
-
-    # pil图片转变为bytes
-    def pil_image_to_bytes(self, image: Image.Image, format: str = "PNG") -> bytes:
-        buf = BytesIO()
-        image.save(buf, format=format, optimize=True)  # optimize优化图片大小
-        return buf.getvalue()
-
-    # 主动消息发送比赛排行榜
     async def _send_match_leaderboard_to_session(
         self,
         session: str,
@@ -1666,9 +1488,9 @@ class Mrfzccl(Star):
         self._shutting_down = True
         # 取消比赛相关任务（防止卸载后仍在后台发送消息）
         for task in list(self.match_next_task.values()):
-            self._safe_cancel_task(task)
+            safe_cancel_task(task)
         for task in list(self.match_loop_task.values()):
-            self._safe_cancel_task(task)
+            safe_cancel_task(task)
         self.match_next_task.clear()
         self.match_loop_task.clear()
         self.match_sessions.clear()
