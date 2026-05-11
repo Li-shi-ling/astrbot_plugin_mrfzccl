@@ -19,7 +19,11 @@ from .src.gameplay.judging import (
 from .src.competition.service import MatchService
 from .src.images.service import ImageDownloader
 from .src.gameplay.questions import QuestionPicker
-from .src.rendering import QnAStatsRenderer
+from .src.rendering import (
+    QnAStatsRenderer,
+    QnAStatsRendererIndustrial,
+    QnAStatsRendererRetroWin,
+)
 from .src.core.runtime import GameRuntime, MatchRuntime
 from .src.tool import (
     generate_match_leaderboard_text,
@@ -255,10 +259,15 @@ class Mrfzccl(Star):
 
         # 初始化问答统计渲染器
         renderer_theme = self.Config.get("renderer_theme", "light")
+        if renderer_theme in {"retro_win", "retro", "win95", "win"}:
+            renderer_cls = QnAStatsRendererRetroWin
+        elif renderer_theme in {"industrial", "dark"}:
+            renderer_cls = QnAStatsRendererIndustrial
+        else:
+            renderer_cls = QnAStatsRenderer
         t2i_config = self.settings.t2i
-        self.renderer = QnAStatsRenderer(
+        self.renderer = renderer_cls(
             output_dir=str(self.img_tmp_path),
-            theme=renderer_theme,
             t2i_enabled=t2i_config.enabled,
             t2i_endpoint=t2i_config.endpoint,
             t2i_max_concurrent=t2i_config.max_concurrent,
