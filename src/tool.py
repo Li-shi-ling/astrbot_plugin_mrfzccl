@@ -380,7 +380,7 @@ def parse_aliases_json_text(alias_text: str) -> dict[str, str]:
 
 # 合并多份别名映射并让后者覆盖前者。
 def merge_alias_maps(*alias_maps: Mapping[str, str]) -> dict[str, str]:
-    """Merge multiple alias maps with later maps overriding earlier ones."""
+    """合并多份别名映射并让后者覆盖前者。"""
     merged: dict[str, str] = {}
     for alias_map in alias_maps:
         for alias, name in (alias_map or {}).items():

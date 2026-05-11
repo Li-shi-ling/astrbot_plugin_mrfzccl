@@ -6,9 +6,8 @@ from typing import Any, Mapping
 
 LLM_JUDGE_MAX_RETRIES_HARD_LIMIT = 5
 DEFAULT_LLM_JUDGE_PROMPT = (
-    "You are an Arknights guess-answer judge. "
-    "Known answer: {answer}. User guess: {guess}. "
-    "Output only True or False."
+    "你是明日方舟猜题判题器。已知标准答案：{answer}。用户回答：{guess}。"
+    "请只判断用户回答是否可以视为该标准答案。只能输出 True 或 False，不要输出其他任何内容。"
 )
 
 

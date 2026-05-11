@@ -56,8 +56,8 @@ import time
 import os
 import re
 
-# 娉ㄥ唽鎻掍欢锛屾寚瀹氭彃浠跺悕銆佷綔鑰呫€佹弿杩板拰鐗堟湰鍙?
-@register("mrfzccl", "Lishining", "浣犵煡閬撶殑,鎴戜竴鐩存槸鏄庢棩鏂硅垷楂樻墜", "1.0.0")
+# 注册插件，指定插件名、作者、描述和版本号
+@register("mrfzccl", "Lishining", "你知道的,我一直是明日方舟高手", "1.0.0")
 class Mrfzccl(Star):
     _question_candidate_names: np.ndarray
     _question_candidate_urls: List[List[str]]
@@ -68,51 +68,51 @@ class Mrfzccl(Star):
     _question_rng: np.random.Generator
     recent_characters: List[str]
 
-    # 鎻掍欢鍒濆鍖栨柟娉?
+    # 插件初始化方法
     def __init__(self, context: Context, config: AstrBotConfig):
         self.plugin_dir = Path(__file__).resolve().parent
         self.settings = load_settings(config, self.plugin_dir)
         self.game_runtime = GameRuntime()
         self.match_runtime = MatchRuntime(self.game_runtime)
-        super().__init__(context, config)  # 璋冪敤鐖剁被鍒濆鍖?
+        super().__init__(context, config)  # 调用父类初始化
         self.context = context
-        self.Config = config  # 淇濆瓨閰嶇疆瀵硅薄
-        self.player: Dict[str, Dict[str, Any]] = {}  # 瀛樺偍鐜╁娓告垙鐘舵€?
-        self.original_images: Dict[str, Image.Image] = {}  # 淇濆瓨鍘熷鍥剧墖瀵硅薄
-        self.is_load = False  # 鏁版嵁鍔犺浇鏍囧織
-        self._shutting_down = False  # 娣诲姞鍏抽棴鏍囧織锛岀敤浜庝紭闆呭叧闂?
+        self.Config = config  # 保存配置对象
+        self.player: Dict[str, Dict[str, Any]] = {}  # 存储玩家游戏状态
+        self.original_images: Dict[str, Image.Image] = {}  # 保存原始图片对象
+        self.is_load = False  # 数据加载标志
+        self._shutting_down = False  # 添加关闭标志，用于优雅关闭
         self.game_runtime.player = self.player
         self.game_runtime.original_images = self.original_images
 
-        # 鏄惁瀵规帓琛屾绫昏繘琛岀鐞嗗憳闄愬埗
+        # 是否对排行榜类进行管理员限制
         self.require_admin = self.Config.get("require_admin", True)
 
-        # 鎻愮ず淇℃伅绫诲瀷鏄犲皠瀛楀吀
+        # 提示信息类型映射字典
         self.fct_key = {
-            0: "\u804c\u4e1a\u53ca\u5206\u652f",
-            1: "\u661f\u7ea7",
-            2: "\u9635\u8425",
-            3: "\u83b7\u53d6\u65b9\u5f0f",
+            0: "职业及分支",  # 第一个提示：职业
+            1: "星级",  # 第二个提示：星级
+            2: "阵营",  # 第三个提示：阵营
+            3: "获取方式",  # 第四个提示：获取方式
         }
 
-        # 浠庨厤缃枃浠惰鍙栫浉浼煎害闃堝€?
+        # 从配置文件读取相似度阈值
         self.similarity_threshold = self.Config.get("similarity_threshold", 0.5)
         self.enable_similarity_match = self.Config.get("enable_similarity_match", True)
-        # 浠庨厤缃枃浠惰鍙栧瓧绗﹀尮閰嶉槇鍊?
+        # 从配置文件读取字符匹配阈值
         self.calculate_threshold = self.Config.get("calculate_threshold", 0.5)
         self.enable_character_coverage_match = self.Config.get(
             "enable_character_coverage_match", True
         )
-        # 鏄惁鍚敤鍚岄煶瀛楀尮閰?
+        # 是否启用同音字匹配
         self.enable_homophone = self.Config.get("enable_homophone", False)
-        # 鏄惁鍚敤骞插憳鍒悕绮剧‘鍒ら
+        # 是否启用干员别名精确判题
         self.enable_operator_alias_match = self.Config.get(
             "enable_operator_alias_match", True
         )
         self.enable_other_message_exact_match = self.Config.get(
             "enable_other_message_exact_match", True
         )
-        # 涓嬭浇 bilibili wiki 鍥剧墖鏃剁殑閲嶈瘯閰嶇疆
+        # 下载 bilibili wiki 图片时的重试配置
         image_download_retry = self.Config.get("image_download_retry", {}) or {}
         if not isinstance(image_download_retry, dict):
             image_download_retry = {}
@@ -159,30 +159,31 @@ class Mrfzccl(Star):
             float(image_download_retry.get("retry_interval_seconds", 0.5) or 0.0),
         )
 
-        # 姣忔棩闄愬埗閰嶇疆
-        self.daily_limit = self.Config.get("daily_game_limit", 10)  # 姣忔棩娓告垙娆℃暟闄愬埗
-        self.daily_usage: dict = {}  # 璁板綍姣忔棩浣跨敤鎯呭喌
-        self.daily_counter: dict = {}  # 璁板綍姣忔棩璁℃暟鍣?
+        # 每日限制配置
+        self.daily_limit = self.Config.get("daily_game_limit", 10)  # 每日游戏次数限制
+        self.daily_usage: dict = {}  # 记录每日使用情况
+        self.daily_counter: dict = {}  # 记录每日计数器
 
-        # 姣旇禌鐘舵€佽拷韪?
+        # 比赛状态追踪
         self.match_question_state: dict[
             str, float
-        ] = {}  # group_id -> 褰撳墠棰樼洰寮€濮嬫椂闂存埑
+        ] = {}  # group_id -> 当前题目开始时间戳
         self.match_next_task: dict[
             str, asyncio.Task
-        ] = {}  # group_id -> 褰撳墠棰樼洰鐨勮嚜鍔ㄦ彁绀轰换鍔?
+        ] = {}  # group_id -> 当前题目的自动提示任务
         self.match_loop_task: dict[
             str, asyncio.Task
-        ] = {}  # group_id -> 姣旇禌缁撴潫妫€娴嬪惊鐜换鍔?
+        ] = {}  # group_id -> 比赛结束检测循环任务
         self.match_sessions: dict[
             str, str
-        ] = {}  # group_id -> unified_msg_origin锛堢敤浜庝富鍔ㄦ秷鎭級
+        ] = {}  # group_id -> unified_msg_origin（用于主动消息）
         self.match_locks: dict[
             str, asyncio.Lock
-        ] = {}  # room_id(group_id/绉佽亰user_id) -> 閿侊紝闃叉骞跺彂瑙﹀彂瀵艰嚧鐘舵€侀敊涔?
+        ] = {}  # room_id(group_id/私聊user_id) -> 锁，防止并发触发导致状态错乱
         self._room_lock_last_used: dict[
             str, float
-        ] = {}  # room_id -> 鏈€杩戜竴娆′娇鐢ㄦ椂闂存埑锛堢敤浜庢竻鐞嗛暱鏈熼棽缃攣锛?
+        ] = {}  # room_id -> 最近一次使用时间戳（用于清理长期闲置锁）
+        self.match_answer_grace_period = self.settings.match.answer_grace_period
         self.match_runtime.question_state = self.match_question_state
         self.match_runtime.next_task = self.match_next_task
         self.match_runtime.loop_task = self.match_loop_task
@@ -190,98 +191,97 @@ class Mrfzccl(Star):
         self.match_runtime.locks = self.match_locks
         self.match_runtime.lock_last_used = self._room_lock_last_used
 
-        # 闃查噸澶嶉厤缃?
-        self.recent_characters: list = []  # 鏈€杩戝嚭鐜扮殑骞插憳鍒楄〃
-        self.max_recent_count = 20  # 鏈€澶ц褰曟暟閲?
+        # 防重复配置
+        self.recent_characters: list = []  # 最近出现的干员列表
+        self.max_recent_count = 20  # 最大记录数量
 
-        # 鍒悕绯荤粺
-        self.alias_map: dict = {}  # 骞插憳鍒悕鏄犲皠
+        # 别名系统
+        self.alias_map: dict = {}  # 干员别名映射
         self.operator_aliases_by_name: dict[str, list[str]] = {}
-        self._load_aliases()  # 鍔犺浇鍒悕閰嶇疆
+        self._load_aliases()  # 加载别名配置
 
-        # 浣庢潈閲嶅共鍛橀厤缃紙鍑虹幇姒傜巼杈冧綆鐨勫共鍛橈級
+        # 低权重干员配置（出现概率较低的干员）
         self.low_weight_keywords = self.Config.get(
-            "low_weight_characters", "棰勫骞插憳,鏈哄笀,W,SideStory"
+            "low_weight_characters", "预备干员,机师,W,SideStory"
         ).split(",")
         self.low_weight_ratio = self.Config.get(
             "low_weight_ratio", 0.2
-        )  # 浣庢潈閲嶅共鍛樺嚭鐜版鐜?
+        )  # 低权重干员出现概率
 
-        # 姣旇禌鐩稿叧閰嶇疆
+        # 比赛相关配置
         self.match_question_limit = self.Config.get(
             "match_question_limit", 0
-        )  # 姣旇禌棰樼洰鏁伴噺闄愬埗
-        self.match_time_limit = self.Config.get("match_time_limit", 0)  # 姣旇禌鏃堕棿闄愬埗
+        )  # 比赛题目数量限制
+        self.match_time_limit = self.Config.get("match_time_limit", 0)  # 比赛时间限制
         self.match_hint_delay = self.Config.get(
             "match_hint_delay", 0
-        )  # 姣旇禌瓒呮椂鑷姩鎻愮ず锛堢锛?鍏抽棴锛?
-        self.match_answer_grace_period = self.settings.match.answer_grace_period
-        self.admin_ids = self.Config.get("admin_ids", [])  # 绠＄悊鍛業D鍒楄〃
+        )  # 比赛超时自动提示（秒，0关闭）
+        self.admin_ids = self.Config.get("admin_ids", [])  # 管理员ID列表
 
-        # 璁剧疆榛樿閰嶇疆
-        self.target_size = self.Config.get("target_size", 128)  # 鍥剧墖鐩爣灏哄
-        self.easy_probability = self.Config.get("easy_probability", 0.6)  # 绠€鍗曢毦搴︽鐜?
+        # 设置默认配置
+        self.target_size = self.Config.get("target_size", 128)  # 图片目标尺寸
+        self.easy_probability = self.Config.get("easy_probability", 0.6)  # 简单难度概率
         self.medium_probability = self.Config.get(
             "medium_probability", 0.3
-        )  # 涓瓑闅惧害姒傜巼
-        self.hard_probability = self.Config.get("hard_probability", 0.1)  # 鍥伴毦闅惧害姒傜巼
+        )  # 中等难度概率
+        self.hard_probability = self.Config.get("hard_probability", 0.1)  # 困难难度概率
 
-        # 娣诲姞 HTTP 浼氳瘽绠＄悊
+        # 添加 HTTP 会话管理
         self._session: Optional[aiohttp.ClientSession] = None
-        self._executor = None  # 绾跨▼姹犳墽琛屽櫒
+        self._executor = None  # 线程池执行器
 
-        # 鑾峰彇瀛樺偍鐩綍閰嶇疆
+        # 获取存储目录配置
         self.storage_dir = str(StarTools.get_data_dir())
-        logger.info(f"[Mrfzccl] 瀛樺偍鐩綍: {self.storage_dir}")
+        logger.info(f"[Mrfzccl] 存储目录: {self.storage_dir}")
 
-        # 纭繚瀛樺偍鐩綍瀛樺湪
+        # 确保存储目录存在
         os.makedirs(self.storage_dir, exist_ok=True)
 
-        # 鏋勫缓鏁版嵁搴撹矾寰?
+        # 构建数据库路径
         self.db_path = os.path.join(self.storage_dir, "mrfzccl.db")
-        logger.debug(f"[Mrfzccl] 鏁版嵁搴撶洰褰? {self.db_path}")
+        logger.debug(f"[Mrfzccl] 数据库目录: {self.db_path}")
 
-        # 鍒濆鍖栨暟鎹簱绠＄悊鍣?
+        # 初始化数据库管理器
         self.db = DBManager(db_path=self.db_path)
-        # 鍒濆鍖栫敤鎴烽棶绛斾粨搴?
+        # 初始化用户问答仓库
         self.user_qna_repo = UserQnARepo(self.db)
 
-        # 鍒濆鍖栨瘮璧涗粨搴?
-        self.match_repo = MatchRepo(self.db)  # 姣旇禌浠撳簱
+        # 初始化比赛仓库
+        self.match_repo = MatchRepo(self.db)  # 比赛仓库
 
-        # 鏋勫缓涓存椂鍥剧墖璺緞
+        # 构建临时图片路径
         self.img_tmp_path = Path(get_astrbot_temp_path())
         self.img_tmp_path.mkdir(parents=True, exist_ok=True)
 
-        # 鍒濆鍖栭棶绛旂粺璁℃覆鏌撳櫒
+        # 初始化问答统计渲染器
         renderer_theme = self.Config.get("renderer_theme", "light")
         self.renderer = QnAStatsRenderer(
             output_dir=str(self.img_tmp_path), theme=renderer_theme
         )
-        logger.info(f"[Mrfzccl] 娓叉煋涓婚: {renderer_theme}")
+        logger.info(f"[Mrfzccl] 渲染主题: {renderer_theme}")
 
-        # 鏋勫缓鏁版嵁鏂囦欢璺緞
+        # 构建数据文件路径
         data_path = self.settings.data_path
         try:
-            logger.info(f"[Mrfzccl] ??????: {data_path}")
+            logger.info(f"[Mrfzccl] 数据文件路径: {data_path}")
             if not data_path.exists():
-                logger.error(f"[Mrfzccl] ???????: {data_path}")
+                logger.error(f"[Mrfzccl] 数据文件不存在: {data_path}")
                 return
             with data_path.open("r", encoding="utf-8") as file:
                 self.data = json.load(file)
             if not isinstance(self.data, dict):
-                logger.error("[Mrfzccl] ????????: ??????")
+                logger.error("[Mrfzccl] 数据文件格式错误: 应为字典类型")
                 return
             self.is_load = True
-            logger.info(f"[Mrfzccl] ?????????? {len(self.data)} ???")
+            logger.info(f"[Mrfzccl] 数据加载成功，共加载 {len(self.data)} 个角色")
         except json.JSONDecodeError as exc:
-            logger.error(f"[Mrfzccl] JSON????: {exc}")
+            logger.error(f"[Mrfzccl] JSON解析错误: {exc}")
             logger.error(traceback.format_exc())
         except (FileNotFoundError, PermissionError, OSError) as exc:
-            logger.error(f"[Mrfzccl] ????????: {exc}")
+            logger.error(f"[Mrfzccl] 文件未找到或权限错误: {exc}")
             logger.error(traceback.format_exc())
         except Exception as exc:
-            logger.error(f"[Mrfzccl] ?????????????: {exc}")
+            logger.error(f"[Mrfzccl] 加载数据文件时发生未知错误: {exc}")
             logger.error(traceback.format_exc())
         self.question_picker = QuestionPicker(
             self.data if getattr(self, "is_load", False) else {},
@@ -334,22 +334,22 @@ class Mrfzccl(Star):
             hint_delay=self.match_hint_delay,
         )
 
-    # ========== 娓告垙鐩稿叧鎸囦护 ==========
-    # 鍒濆鍖栨父鎴忓懡浠?
+    # ========== 游戏相关指令 ==========
+    # 初始化游戏命令
     @filter.command("fc")
     async def fc(self, event: AstrMessageEvent):
-        """寮€濮嬫父鎴?/fc"""
-        # 妫€鏌ユ暟鎹槸鍚﹀姞杞芥垚鍔?
+        """开始游戏 /fc"""
+        # 检查数据是否加载成功
         if not self.is_load:
             yield event.chain_result(
                 [
-                    Comp.At(qq=event.get_sender_id()),  # @鍙戦€佽€?
-                    Comp.Plain(" 鎻掍欢鏈姞杞芥垚鍔燂紝璇疯仈绯荤鐞嗗憳閰嶇疆鏁版嵁鏂囦欢"),
+                    Comp.At(qq=event.get_sender_id()),  # @发送者
+                    Comp.Plain(" 插件未加载成功，请联系管理员配置数据文件"),
                 ]
             )
             return
 
-        # 鑾峰彇鐢ㄦ埛ID鍜岀兢缁処D锛堟瘮璧涗粎鍦ㄧ兢鑱婃湁鏁堬級
+        # 获取用户ID和群组ID（比赛仅在群聊有效）
         group_id_raw = event.get_group_id()
         sender_id = str(event.get_sender_id())
         is_group = bool(group_id_raw)
@@ -371,11 +371,11 @@ class Mrfzccl(Star):
         if response is not None:
             yield response
 
-    # 杩涜鐚滄祴鍛戒护
+    # 进行猜测命令
     @filter.command("fcc")
     async def fcc(self, event: AstrMessageEvent):
-        """杩涜鐚滈 /fcc [骞插憳鍚嶇О]"""
-        # 鑾峰彇缇ょ粍ID
+        """进行猜题 /fcc [干员名称]"""
+        # 获取群组ID
         group_id_raw = event.get_group_id()
         sender_id = str(event.get_sender_id())
         is_group = bool(group_id_raw)
@@ -402,10 +402,10 @@ class Mrfzccl(Star):
             ):
                 yield result
 
-    # 寮哄埗缁撴潫娓告垙鍛戒护
+    # 强制结束游戏命令
     @filter.command("fce")
     async def fce(self, event: AstrMessageEvent):
-        """寮虹疆缁撴潫娓告垙 /fce"""
+        """强置结束游戏 /fce"""
         group_id_raw = event.get_group_id()
         sender_id = str(event.get_sender_id())
         is_group = bool(group_id_raw)
@@ -426,10 +426,10 @@ class Mrfzccl(Star):
         for r in responses:
             yield r
 
-    # 鑾峰彇鎻愮ず鍛戒护
+    # 获取提示命令
     @filter.command("fct")
     async def fct(self, event: AstrMessageEvent):
-        """鑾峰彇鎻愮ず /fct"""
+        """获取提示 /fct"""
         group_id = event.get_group_id()
         sender_id = str(event.get_sender_id())
         is_group = bool(group_id)
@@ -451,10 +451,10 @@ class Mrfzccl(Star):
         if response is not None:
             yield response
 
-    # 涓€娆℃€ц幏鍙栦笁鏉℃彁绀哄懡浠?
+    # 一次性获取三条提示命令
     @filter.command("fcw")
     async def fcw(self, event: AstrMessageEvent):
-        """涓€娆℃€ц幏鍙栦笁鏉℃彁绀?/fcw"""
+        """一次性获取三条提示 /fcw"""
         group_id = event.get_group_id()
         sender_id = str(event.get_sender_id())
         is_group = bool(group_id)
@@ -476,13 +476,13 @@ class Mrfzccl(Star):
         if response is not None:
             yield response
 
-    # 鐩戝惉绗﹀悎fcc鐨勬寚浠?闃叉璇Е鍙?
+    # 监听符合fcc的指令,防止误触发
     @filter.regex(r"^fcc\S+$")
     async def fcregex(self, event: AstrMessageEvent):
         if not getattr(event, "is_at_or_wake_command", False):
             return
 
-        # 娓呯悊鎸囦护
+        # 清理指令
         normalized = normalize_compact_fc_command(event.message_str)
         if not normalized:
             return
@@ -544,55 +544,55 @@ class Mrfzccl(Star):
             ):
                 yield result
 
-    # ========== ccl 鐩稿叧鎸囦护 ==========
-    # 鍒涘缓鍛戒护缁刢cl
+    # ========== ccl 相关指令 ==========
+    # 创建命令组ccl
     @filter.command_group("ccl")
     def ccl(self):
         pass
 
-    # ========== 鎺掕姒滅浉鍏冲嚱鏁?==========
-    # 鑾峰彇姝ｇ‘涓暟鐨勬帓琛屾鍛戒护
-    @ccl.command("\u6392\u884c\u699c")
+    # ========== 排行榜相关函数 ==========
+    # 获取正确个数的排行榜命令
+    @ccl.command("排行榜")
     async def correct_answers_leaderboard(self, event: AstrMessageEvent):
-        """Command adapter."""
+        """获取正确个数的排行榜 /ccl 排行榜"""
         async for r in ccl_leaderboard.handle_correct_answers_leaderboard(self, event):
             yield r
 
-    # 鑾峰彇閿欒涓暟鐨勬帓琛屾鍛戒护
-    @ccl.command("\u9519\u8bef\u6392\u884c\u699c")
+    # 获取错误个数的排行榜命令
+    @ccl.command("错误排行榜")
     async def wrong_answers_leaderboard(self, event: AstrMessageEvent):
-        """Command adapter."""
+        """获取错误个数的排行榜 /ccl 错误排行榜"""
         async for r in ccl_leaderboard.handle_wrong_answers_leaderboard(self, event):
             yield r
 
-    # 鑾峰彇浣跨敤鎻愮ず娆℃暟鐨勬帓琛屾鍛戒护
-    @ccl.command("\u63d0\u793a\u6392\u884c\u699c")
+    # 获取使用提示次数的排行榜命令
+    @ccl.command("提示排行榜")
     async def hints_usage_leaderboard(self, event: AstrMessageEvent):
-        """Command adapter."""
+        """获取使用提示次数的排行榜 /ccl 提示排行榜"""
         async for r in ccl_leaderboard.handle_hints_usage_leaderboard(self, event):
             yield r
 
-    # 鑾峰彇涓汉淇℃伅鑾峰彇鍛戒护
-    @ccl.command("\u540d\u7247")
+    # 获取个人信息获取命令
+    @ccl.command("名片")
     async def user_profile_retrieval(
         self, event: AstrMessageEvent, user_id: str | None = None
     ):
-        """鑾峰彇涓汉淇℃伅鑾峰彇 /ccl 鍚嶇墖 [user_id] (濡傛灉user_id涓虹┖榛樿涓哄彂閫佷汉)"""
+        """获取个人信息获取 /ccl 名片 [user_id] (如果user_id为空默认为发送人)"""
         async for r in ccl_leaderboard.handle_user_profile_retrieval(
             self, event, user_id=user_id
         ):
             yield r
 
-    # ========== 姣旇禌鐩稿叧鍑芥暟 ==========
-    # 姣旇禌甯姪鍛戒护
-    @ccl.command("\u6bd4\u8d5b\u5e2e\u52a9")
+    # ========== 比赛相关函数 ==========
+    # 比赛帮助命令
+    @ccl.command("比赛帮助")
     async def match_help(self, event: AstrMessageEvent):
-        """姣旇禌妯″紡甯姪"""
+        """比赛模式帮助"""
         async for r in ccl_match.handle_match_help(self, event):
             yield r
 
-    # 鍒涘缓姣旇禌鍛戒护
-    @ccl.command("\u6bd4\u8d5b\u521b\u5efa")
+    # 创建比赛命令
+    @ccl.command("比赛创建")
     async def match_create(
         self,
         event: AstrMessageEvent,
@@ -600,7 +600,9 @@ class Mrfzccl(Star):
         question_limit: int = 0,
         time_limit: int = 0,
     ):
-        """Command adapter."""
+        """创建比赛（仅管理员）用法: /ccl 比赛创建 [名称] [题目限制] [时间限制(分钟)]
+        例如: /ccl 比赛创建 春节赛 20 30 表示创建名称为"春节赛"、答完20题自动结束、最多30分钟的比赛
+        题目限制填0表示不限制，时间限制填0表示不限制。比赛开始后，参与答题的用户自动成为参赛者"""
         async for r in ccl_match.handle_match_create(
             self,
             event,
@@ -610,10 +612,10 @@ class Mrfzccl(Star):
         ):
             yield r
 
-    # 姣旇禌娓告垙寰幆
-    @ccl.command("\u6bd4\u8d5b\u5f00\u59cb")
+    # 比赛游戏循环
+    @ccl.command("比赛开始")
     async def match_start(self, event: AstrMessageEvent):
-        """Command adapter."""
+        """使用`/ccl 比赛开始`开始比赛（仅管理员）"""
         ok, group_id, error_resp = await ccl_match.match_start_precheck(self, event)
         if not ok:
             if error_resp is not None:
@@ -626,15 +628,15 @@ class Mrfzccl(Star):
 
         yield ccl_match.build_match_start_response(event, result)
 
-        # 鍒涘缓姣旇禌寰幆浠诲姟锛岀敤浜庢鏌ョ粨鏉熸潯浠?
+        # 创建比赛循环任务，用于检查结束条件
         self.match_loop_task[group_id] = asyncio.create_task(
             self._match_game_loop(group_id)
         )
 
-    # 缁撴潫姣旇禌鍛戒护
-    @ccl.command("\u6bd4\u8d5b\u7ed3\u675f")
+    # 结束比赛命令
+    @ccl.command("比赛结束")
     async def match_end(self, event: AstrMessageEvent):
-        """浣跨敤`/ccl 姣旇禌缁撴潫`缁撴潫姣旇禌锛堜粎绠＄悊鍛橈級"""
+        """使用`/ccl 比赛结束`结束比赛（仅管理员）"""
         ok, group_id, error_resp = await ccl_match.match_end_precheck(self, event)
         if not ok:
             if error_resp is not None:
@@ -648,7 +650,7 @@ class Mrfzccl(Star):
             )
 
         if not ended:
-            yield event.plain_result("鉂?褰撳墠娌℃湁杩涜涓殑姣旇禌")
+            yield event.plain_result("❌ 当前没有进行中的比赛")
             return
 
         async for r in ccl_match.iter_match_end_results(
@@ -656,49 +658,49 @@ class Mrfzccl(Star):
         ):
             yield r
 
-    # 姣旇禌鎺掕姒滃懡浠?
-    @ccl.command("\u6bd4\u8d5b\u6392\u884c")
+    # 比赛排行榜命令
+    @ccl.command("比赛排行")
     async def match_leaderboard(self, event: AstrMessageEvent):
-        """Command adapter."""
+        """使用`/ccl 比赛排行`获取比赛排行榜"""
         async for r in ccl_match.handle_match_leaderboard(self, event):
             yield r
 
-    # 娓呴櫎鐢ㄦ埛鏁版嵁鍛戒护
-    @ccl.command("\u6e05\u9664\u6570\u636e")
+    # 清除用户数据命令
+    @ccl.command("清除数据")
     async def reset_user_data(self, event: AstrMessageEvent, target_user_id: str = ""):
-        """娓呴櫎鐢ㄦ埛绛旈鏁版嵁锛堜粎绠＄悊鍛橈級/ccl 娓呴櫎鏁版嵁 [user_id]"""
+        """清除用户答题数据（仅管理员）/ccl 清除数据 [user_id]"""
         async for r in ccl_admin.handle_reset_user_data(
             self, event, target_user_id=target_user_id
         ):
             yield r
 
-    # 娓呴櫎鐢ㄦ埛鑽ｈ獕鍛戒护
-    @ccl.command("\u6e05\u9664\u8363\u8a89")
+    # 清除用户荣誉命令
+    @ccl.command("清除荣誉")
     async def reset_user_honors_cmd(
         self, event: AstrMessageEvent, target_user_id: str = ""
     ):
-        """娓呴櫎鐢ㄦ埛鑽ｈ獕鏁版嵁锛堜粎绠＄悊鍛橈級/ccl 娓呴櫎鑽ｈ獕 [user_id]"""
+        """清除用户荣誉数据（仅管理员）/ccl 清除荣誉 [user_id]"""
         async for r in ccl_admin.handle_reset_user_honors_cmd(
             self, event, target_user_id=target_user_id
         ):
             yield r
 
-    # 娓呴櫎鎵€鏈夌敤鎴锋暟鎹懡浠?
-    @ccl.command("\u6e05\u9664\u6240\u6709\u6570\u636e")
+    # 清除所有用户数据命令
+    @ccl.command("清除所有数据")
     async def reset_all_data_cmd(self, event: AstrMessageEvent):
-        """Command adapter."""
+        """清除所有用户的答题数据（仅管理员）/ccl 清除所有数据"""
         async for r in ccl_admin.handle_reset_all_data_cmd(self, event):
             yield r
 
-    # 娓呴櫎鎵€鏈夌敤鎴疯崳瑾夊懡浠?
-    @ccl.command("\u6e05\u9664\u6240\u6709\u8363\u8a89")
+    # 清除所有用户荣誉命令
+    @ccl.command("清除所有荣誉")
     async def reset_all_honors_cmd(self, event: AstrMessageEvent):
-        """Command adapter."""
+        """清除所有用户的荣誉数据（仅管理员）/ccl 清除所有荣誉"""
         async for r in ccl_admin.handle_reset_all_honors_cmd(self, event):
             yield r
 
-    # 鎺堜簣鐢ㄦ埛鑽ｈ獕鍛戒护
-    @ccl.command("\u6388\u4e88\u8363\u8a89")
+    # 授予用户荣誉命令
+    @ccl.command("授予荣誉")
     async def grant_honor_cmd(
         self,
         event: AstrMessageEvent,
@@ -707,7 +709,8 @@ class Mrfzccl(Star):
         match_name: str = "",
         correct_count: int = 0,
     ):
-        """Command adapter."""
+        """授予用户特定荣誉（仅管理员）/ccl 授予荣誉 [user_id] [名次] [比赛名称] [答对数量]
+        例如: /ccl 授予荣誉 123456 1 测试赛 10"""
         async for r in ccl_admin.handle_grant_honor_cmd(
             self,
             event,
@@ -718,8 +721,8 @@ class Mrfzccl(Star):
         ):
             yield r
 
-    # ========== 宸ュ叿绫荤浉鍏冲嚱鏁?==========
-    # 鍙戦€佸師濮嬪浘鐗?
+    # ========== 工具类相关函数 ==========
+    # 发送原始图片
     async def send_original_image(self, user_id: str, event: AstrMessageEvent):
         return await self.game_service.send_original_image(user_id, event)
 
@@ -738,6 +741,7 @@ class Mrfzccl(Star):
     def _clear_match_runtime(self, group_id: str) -> None:
         self.match_runtime.clear_match_runtime(group_id)
 
+    # 获取比赛结束原因
     async def _get_match_end_reason(self, match) -> str | None:
         return await self.match_service.get_match_end_reason(match)
 
@@ -746,19 +750,25 @@ class Mrfzccl(Star):
     ) -> tuple[str, int, list]:
         return await self.match_service.end_match_and_collect_top(group_id, match)
 
+    # 生成下一条提示文本并推进提示计数
     def _next_hint_text_and_advance(self, user_id: str) -> tuple[str, bool]:
-        player_state = self.player.get(user_id, {})
-        fctn = int(player_state.get("fctn", 0) or 0)
-        name = str(player_state.get("name", "") or "")
+        """生成下一条提示，并将 fctn +1（不含任何权限/活跃检查）。
+
+        返回:
+            (hint_text, has_more)
+            has_more=False 表示本题已无更多有效提示（通常为名称已全部揭示）。
+        """
+        fctn = int(self.player.get(user_id, {}).get("fctn", 0) or 0)
+        name = str(self.player.get(user_id, {}).get("name", "") or "")
         has_more = True
 
         if fctn <= 3:
             key = self.fct_key.get(fctn, "")
             char_data = self.data.get(name, {}) if name else {}
+
             if key == "职业及分支":
                 value = char_data.get(
-                    "职业及分支",
-                    char_data.get("职业分支", "该干员没有该属性"),
+                    "职业及分支", char_data.get("职业分支", "该干员没有该属性")
                 )
             elif fctn == 1:
                 star_map = {
@@ -778,22 +788,27 @@ class Mrfzccl(Star):
                 )
             else:
                 value = char_data.get(key, "该干员没有该属性")
+
             text = f"这个干员的{key}为:{value}"
         else:
+            # 名称提示：每次出现增加 1/3（向上取整）
             if not name:
                 text = "无法获取干员名称"
                 has_more = False
             else:
-                chunk = max(1, (len(name) + 2) // 3)
-                step = max(1, fctn - 3)
+                chunk = max(1, (len(name) + 2) // 3)  # ceil(len/3)
+                step = max(1, fctn - 3)  # 1,2,3...
                 reveal_len = min(len(name), chunk * step)
                 text = f"这个干员的前{reveal_len}个字为:{name[:reveal_len]}"
                 has_more = reveal_len < len(name)
 
+        # 递增提示计数
         if user_id in self.player:
             self.player[user_id]["fctn"] = fctn + 1
+
         return text, has_more
 
+    # 为当前题目安排超时自动提示
     def _schedule_match_hint(self, group_id: str) -> None:
         self.match_service.schedule_match_hint(group_id)
 
@@ -802,6 +817,7 @@ class Mrfzccl(Star):
     ) -> None:
         await self.match_service.match_hint_after_delay(group_id, session, delay, token)
 
+    # 加载别名映射
     def _load_aliases(self):
         alias_settings = self.settings.aliases
         self.alias_map = merge_alias_maps(
@@ -812,7 +828,6 @@ class Mrfzccl(Star):
             alias_settings.operator_aliases_path
         )
 
-    # 鍒濆鍖栨父鎴忥紝杩斿洖涓存椂鏂囦欢璺緞
     def _build_llm_judge_prompt(self, answer: str, guess: str) -> str:
         return self.llm_judge_service.build_prompt(answer, guess)
 
@@ -860,27 +875,28 @@ class Mrfzccl(Star):
     async def _match_game_loop(self, group_id: str):
         await self.match_service.match_game_loop(group_id)
 
+    # 插件初始化时
     async def initialize(self):
         await self.db.init_db()
-        logger.debug(f"[Mrfzccl] 鍒濆鍖栨暟鎹簱{self.db.db_url}")
+        logger.debug(f"[Mrfzccl] 初始化数据库{self.db.db_url}")
 
-    # 鎻掍欢鍗歌浇鏃剁殑娓呯悊閽╁瓙
+    # 插件卸载时的清理钩子
     async def terminate(self):
         self._shutting_down = True
-        # 鍙栨秷姣旇禌鐩稿叧浠诲姟锛堥槻姝㈠嵏杞藉悗浠嶅湪鍚庡彴鍙戦€佹秷鎭級
+        # 取消比赛相关任务（防止卸载后仍在后台发送消息）
         self.match_runtime.cancel_all_match_tasks()
 
         if self._session and not self._session.closed:
             await self._session.close()
             logger.debug("[Mrfzccl] HTTP session closed")
 
-    # 鑾峰彇鎴栧垱寤?HTTP 浼氳瘽
+    # 获取或创建 HTTP 会话
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
             timeout = aiohttp.ClientTimeout(total=10)
             connector = aiohttp.TCPConnector(
                 limit=10, limit_per_host=5
-            )  # 闄愬埗杩炴帴姹犲ぇ灏?
+            )  # 限制连接池大小
             self._session = aiohttp.ClientSession(
                 timeout=timeout,
                 connector=connector,
@@ -888,5 +904,5 @@ class Mrfzccl(Star):
                     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
                 },
             )
-            logger.debug("[Mrfzccl] 鍒涘缓鏂扮殑HTTP浼氳瘽")
+            logger.debug("[Mrfzccl] 创建新的HTTP会话")
         return self._session
