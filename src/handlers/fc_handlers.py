@@ -572,13 +572,17 @@ async def handle_fcw(
 
         response = event.plain_result(msg)
 
-        # 设置提示计数为4（跳过属性提示阶段）
-        self.player[user_id]["fctn"] = 4
-        # 更新用户提示使用次数
-        await self.user_qna_repo.increment_tip_count(
-            user_id=sender_id,
-            user_name=event.get_sender_name(),
-            increment=3,
-        )
+        current_hint_count = int(self.player[user_id].get("fctn", 0) or 0)
+        hint_increment = max(0, 3 - current_hint_count)
+
+        if current_hint_count < 3:
+            self.player[user_id]["fctn"] = 3
+
+        if hint_increment > 0:
+            await self.user_qna_repo.increment_tip_count(
+                user_id=sender_id,
+                user_name=event.get_sender_name(),
+                increment=hint_increment,
+            )
 
     return response
