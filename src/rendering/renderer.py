@@ -19,7 +19,7 @@ try:
 except ImportError:
     AIOHTTP_AVAILABLE = False
 
-from .db.tables import MatchHonor, MatchParticipant, UserQnAStats
+from ..db.tables import MatchHonor, MatchParticipant, UserQnAStats
 
 
 class QnAStatsRenderer:

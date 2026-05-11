@@ -1,4 +1,4 @@
-from .QnAStatsRenderer import QnAStatsRenderer
+from .renderer import QnAStatsRenderer
 
 
 class QnAStatsRendererIndustrial(QnAStatsRenderer):

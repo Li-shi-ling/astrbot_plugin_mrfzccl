@@ -1,5 +1,16 @@
 ## 更新日志
 
+### 1.2.33
+- Refactor plugin entry into AstrBot registration, lifecycle, and dependency assembly only.
+- Split configuration, runtime, judging, question picking, media, match, and statistics logic into testable `core/`, `gameplay/`, `images/`, `competition/`, and `stats/` packages.
+- Preserve compatibility wrappers for existing commands, match mode, LLM judging, and image download retry behavior.
+
+### 1.2.32
+- ✅ 移除旧版 `QnAStatsRenderer*` 兼容入口，统一从 `src/rendering` 使用渲染模块
+
+### 1.2.31
+- ✅ 将 QnAStatsRenderer 相关实现划分到 `src/rendering` 模块
+
 ### 1.2.30
 - ✅ 将 `main.py` 中不依赖插件实例状态的工具方法迁移到 `src/tool.py`，保持入口类聚焦于插件编排
 

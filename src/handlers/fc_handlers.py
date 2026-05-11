@@ -3,17 +3,22 @@ from __future__ import annotations
 import time
 import traceback
 from collections.abc import AsyncIterator
-from difflib import SequenceMatcher
 from typing import Any
 
 import astrbot.api.message_components as Comp
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 
+from ..gameplay.judging import (
+    MatchSettings,
+    get_answer_match_details,
+    is_matching_answer,
+    is_recent_previous_match_answer,
+    is_recent_previous_match_answer_with_llm,
+    can_check_recent_previous_match_answer,
+)
 from ..tool import (
-    calculate_char_coverage_set,
     check_daily_limit,
-    check_homophone,
     generate_image_or_fallback,
     generate_match_leaderboard_text,
     has_active_game,
@@ -28,85 +33,36 @@ from ..tool import (
 def _get_answer_match_details(
     self, answer: str, guess: str
 ) -> tuple[float, float, bool, bool]:
-    similarity = SequenceMatcher(None, answer, guess).ratio()
-    coverage = calculate_char_coverage_set(answer, guess)
-    exact_match = answer == guess
-    homophone_match = check_homophone(
-        answer, guess, enable_homophone=self.enable_homophone
-    )
-    similarity_match = getattr(self, "enable_similarity_match", True) and (
-        similarity > self.similarity_threshold
-    )
-    coverage_match = getattr(self, "enable_character_coverage_match", True) and (
-        coverage > self.calculate_threshold
-    )
-    is_correct = exact_match or similarity_match or coverage_match or homophone_match
-    return similarity, coverage, homophone_match, is_correct
+    return get_answer_match_details(answer, guess, _judge_settings_from_plugin(self))
 
 
 # 判断当前输入是否可以视为正确答案。
 def _is_matching_answer(self, answer: str, guess: str) -> bool:
-    alias_match_enabled = getattr(self, "enable_operator_alias_match", True)
-    if alias_match_enabled and is_exact_operator_alias_match(
-        answer, guess, getattr(self, "operator_aliases_by_name", {})
-    ):
-        return True
-    _, _, _, is_correct = _get_answer_match_details(self, answer, guess)
-    return is_correct
+    return is_matching_answer(
+        answer,
+        guess,
+        aliases_by_name=getattr(self, "operator_aliases_by_name", {}),
+        settings=_judge_settings_from_plugin(self),
+    )
 
 
 # 判断当前输入是否命中比赛宽限期内的上一题答案。
 def _is_recent_previous_match_answer(
     self, player_state: dict[str, Any], guess: str
 ) -> bool:
-    previous_answer = player_state.get("previous_answer")
-    switched_at = player_state.get("previous_answer_switched_at")
-    if not previous_answer or switched_at is None:
-        return False
-
-    grace_period = max(
-        0.0, float(getattr(self, "match_answer_grace_period", 3.0) or 0.0)
+    return is_recent_previous_match_answer(
+        player_state,
+        guess,
+        alias_map=getattr(self, "alias_map", {}),
+        aliases_by_name=getattr(self, "operator_aliases_by_name", {}),
+        settings=_judge_settings_from_plugin(self),
     )
-    if grace_period <= 0:
-        return False
-
-    try:
-        switched_at_ts = float(switched_at)
-    except (TypeError, ValueError):
-        return False
-
-    if time.time() - switched_at_ts > grace_period:
-        return False
-
-    previous_answer_text = str(previous_answer)
-    if _is_matching_answer(self, previous_answer_text, guess):
-        return True
-
-    normalized_guess = resolve_alias(guess, getattr(self, "alias_map", {}))
-    if normalized_guess == guess:
-        return False
-
-    return _is_matching_answer(self, previous_answer_text, normalized_guess)
 
 
 def _can_check_recent_previous_match_answer(self, player_state: dict[str, Any]) -> bool:
-    previous_answer = player_state.get("previous_answer")
-    switched_at = player_state.get("previous_answer_switched_at")
-    if not previous_answer or switched_at is None:
-        return False
-
-    grace_period = max(
-        0.0, float(getattr(self, "match_answer_grace_period", 3.0) or 0.0)
+    return can_check_recent_previous_match_answer(
+        player_state, _judge_settings_from_plugin(self)
     )
-    if grace_period <= 0:
-        return False
-
-    try:
-        switched_at_ts = float(switched_at)
-    except (TypeError, ValueError):
-        return False
-
-    return time.time() - switched_at_ts <= grace_period
 
 
 async def _is_recent_previous_match_answer_with_llm(
@@ -115,31 +71,31 @@ async def _is_recent_previous_match_answer_with_llm(
     guess: str,
     unified_msg_origin: str | None = None,
 ) -> bool:
-    if _is_recent_previous_match_answer(self, player_state, guess):
-        return True
-    if not _can_check_recent_previous_match_answer(self, player_state):
-        return False
-
-    previous_answer = player_state.get("previous_answer")
-    if not previous_answer:
-        return False
-
-    previous_answer_text = str(previous_answer)
-    if await self.judge_answer_with_llm(
-        previous_answer_text,
+    return await is_recent_previous_match_answer_with_llm(
+        player_state,
         guess,
+        alias_map=getattr(self, "alias_map", {}),
+        aliases_by_name=getattr(self, "operator_aliases_by_name", {}),
+        settings=_judge_settings_from_plugin(self),
+        llm_judge=self.judge_answer_with_llm,
         unified_msg_origin=unified_msg_origin,
-    ):
-        return True
+    )
 
-    normalized_guess = resolve_alias(guess, getattr(self, "alias_map", {}))
-    if normalized_guess == guess:
-        return False
 
-    return await self.judge_answer_with_llm(
-        previous_answer_text,
-        normalized_guess,
-        unified_msg_origin=unified_msg_origin,
+def _judge_settings_from_plugin(self) -> MatchSettings:
+    existing = getattr(self, "judge_settings", None)
+    if isinstance(existing, MatchSettings):
+        return existing
+    return MatchSettings(
+        similarity_threshold=getattr(self, "similarity_threshold", 0.5),
+        calculate_threshold=getattr(self, "calculate_threshold", 0.5),
+        enable_similarity_match=getattr(self, "enable_similarity_match", True),
+        enable_character_coverage_match=getattr(
+            self, "enable_character_coverage_match", True
+        ),
+        enable_homophone=getattr(self, "enable_homophone", False),
+        enable_operator_alias_match=getattr(self, "enable_operator_alias_match", True),
+        match_answer_grace_period=getattr(self, "match_answer_grace_period", 3.0),
     )
 
 
