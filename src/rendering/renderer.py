@@ -60,7 +60,7 @@ class QnAStatsRenderer:
         self._avatar_concurrency = 8
         self._avatar_timeout_seconds = 4
 
-    # ======================= helpers =======================
+    # ======================= 辅助函数 =======================
     @staticmethod
     def _esc(value: Any) -> str:
         return html.escape(str(value), quote=True)
@@ -177,7 +177,7 @@ class QnAStatsRenderer:
             avatar_map[uid] = data_url
         return avatar_map
 
-    # ======================= CSS =======================
+    # ======================= 样式 =======================
     def _theme_css(self) -> str:
         if self.theme in {"light", "white"}:
             return """
@@ -227,7 +227,7 @@ class QnAStatsRenderer:
             </style>
             """
 
-        # industrial (default)
+        # 工业风格（默认）
         return """
         <style>
         :root{
@@ -879,7 +879,7 @@ class QnAStatsRenderer:
         </style>
         """
 
-    # ======================= size =======================
+    # ======================= 尺寸计算 =======================
     def _calc_table_height(self, row_count: int) -> int:
         return (
             self.BASE_HEIGHT
@@ -888,7 +888,7 @@ class QnAStatsRenderer:
             + self.SAFE_PADDING
         )
 
-    # ======================= render core =======================
+    # ======================= 渲染核心 =======================
     def _build_html(self, body_html: str, title: str) -> str:
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         is_retro = self.theme in {"retro_win", "retro", "win95", "win"}
@@ -949,7 +949,7 @@ class QnAStatsRenderer:
         html_str = self._build_html(body_html, title)
         return self._html_to_image(html_str, filename, self.CARD_WIDTH, height)
 
-    # ======================= body builders (HTML) =======================
+    # ======================= 内容构建（HTML）=======================
     def _build_leaderboard_body(
         self,
         users: List[UserQnAStats],
@@ -1175,7 +1175,7 @@ class QnAStatsRenderer:
     def _build_user_profile_body(self, u: UserQnAStats, rank: Mapping[str, Any]) -> str:
         return self._build_user_profile_body_with_avatar(u, rank, avatar_data_url=None)
 
-    # ======================= Public APIs =======================
+    # ======================= 公开接口 =======================
     async def generate_correct_leaderboard_image(
         self, users: List[UserQnAStats]
     ) -> str:

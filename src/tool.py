@@ -353,7 +353,7 @@ def parse_aliases(alias_str: str) -> dict[str, str]:
 
 # 解析 JSON 文本格式的别名映射配置。
 def parse_aliases_json_text(alias_text: str) -> dict[str, str]:
-    """Parse a JSON object alias config into alias -> canonical name mapping."""
+    """解析 JSON 格式的干员别名配置，返回别名到正式名称的映射。"""
     if not alias_text:
         return {}
 

@@ -109,7 +109,7 @@ async def handle_fc(
     is_group: bool,
     group_id: str | None,
 ) -> Any | None:
-    """Core logic for `/fc` (expects room lock is held by caller)."""
+    """/fc 的核心逻辑（调用方已持有房间锁）。"""
     response = None
 
     # 检查是否在比赛模式和是否限制（仅群聊）
@@ -159,7 +159,7 @@ async def handle_fcc(
     group_id: str | None,
     guess_text_override: str | None = None,
 ) -> tuple[list[Any], tuple[str, list] | None]:
-    """Core logic for `/fcc` (expects room lock is held by caller)."""
+    """/fcc 的核心逻辑（调用方已持有房间锁）。"""
     responses: list[Any] = []
 
     match_end_payload: tuple[str, list] | None = (
@@ -369,7 +369,7 @@ async def handle_other_fcc(
     is_group: bool,
     group_id: str | None,
 ) -> tuple[list[Any], tuple[str, list] | None]:
-    """Core logic for plain-text exact-answer hits during an active game."""
+    """游戏进行中，纯文本精确命中答案的核心逻辑。"""
     if not has_active_game(self.player, user_id):
         return [], None
 
@@ -402,7 +402,7 @@ async def iter_match_end_leaderboard(
     event: AstrMessageEvent,
     match_end_payload: tuple[str, list],
 ) -> AsyncIterator[Any]:
-    """Post-lock output for `/fcc` when a match ends (image preferred, text fallback)."""
+    """/fcc 比赛结束后的锁外输出（图片优先，文本回退）。"""
     ended_match_name, ended_top_participants = match_end_payload
     async for result in generate_image_or_fallback(
         event=event,
@@ -430,7 +430,7 @@ async def handle_fce(
     is_group: bool,
     group_id: str | None,
 ) -> list[Any]:
-    """Core logic for `/fce` (expects room lock is held by caller)."""
+    """/fce 的核心逻辑（调用方已持有房间锁）。"""
     responses: list[Any] = []
 
     # 检查比赛模式下是否有权限
@@ -461,7 +461,7 @@ async def handle_fct(
     is_group: bool,
     group_id: str | None,
 ) -> Any | None:
-    """Core logic for `/fct` (expects room lock is held by caller)."""
+    """/fct 的核心逻辑（调用方已持有房间锁）。"""
     # 检查比赛模式下是否有权限（仅群聊）
     match = await self.match_repo.get_active_match(group_id) if is_group else None
     if match and self.admin_ids and sender_id not in [str(x) for x in self.admin_ids]:
@@ -491,7 +491,7 @@ async def handle_fcw(
     is_group: bool,
     group_id: str | None,
 ) -> Any | None:
-    """Core logic for `/fcw` (expects room lock is held by caller)."""
+    """/fcw 的核心逻辑（调用方已持有房间锁）。"""
     # 检查比赛模式下是否有权限（仅群聊）
     match = await self.match_repo.get_active_match(group_id) if is_group else None
     if match and self.admin_ids and sender_id not in [str(x) for x in self.admin_ids]:
