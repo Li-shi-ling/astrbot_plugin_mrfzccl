@@ -1,5 +1,8 @@
 ## 更新日志
 
+### 1.2.36
+- ✅ 修复 T2I API 调用格式：端点为 `/text2img/generate`，请求体使用标准 AstrBot `{tmpl, json, tmpldata, options}` 格式
+
 ### 1.2.35
 - ✅ 新增网络 T2I（HTML 转图片）服务支持，可配置远程 T2I 端点渲染排行榜/名片图片
 - ✅ T2I 渲染失败时自动回退到本地 Html2Image 渲染
