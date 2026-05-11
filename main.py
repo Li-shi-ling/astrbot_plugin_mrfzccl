@@ -57,7 +57,7 @@ import os
 import re
 
 # 注册插件，指定插件名、作者、描述和版本号
-@register("mrfzccl", "Lishining", "你知道的,我一直是明日方舟高手", "1.2.34")
+@register("mrfzccl", "Lishining", "你知道的,我一直是明日方舟高手", "1.2.35")
 class Mrfzccl(Star):
     _question_candidate_names: np.ndarray
     _question_candidate_urls: List[List[str]]
@@ -255,8 +255,13 @@ class Mrfzccl(Star):
 
         # 初始化问答统计渲染器
         renderer_theme = self.Config.get("renderer_theme", "light")
+        t2i_config = self.settings.t2i
         self.renderer = QnAStatsRenderer(
-            output_dir=str(self.img_tmp_path), theme=renderer_theme
+            output_dir=str(self.img_tmp_path),
+            theme=renderer_theme,
+            t2i_enabled=t2i_config.enabled,
+            t2i_endpoint=t2i_config.endpoint,
+            t2i_max_concurrent=t2i_config.max_concurrent,
         )
         logger.info(f"[Mrfzccl] 渲染主题: {renderer_theme}")
 

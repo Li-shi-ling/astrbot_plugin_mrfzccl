@@ -46,15 +46,28 @@ class QnAStatsRenderer:
     USER_PROFILE_HONOR_BASE_HEIGHT = 170
     RETRO_FRAME_EXTRA_HEIGHT = 52
 
-    def __init__(self, output_dir: str = "data/quiz_images", theme: str = "light"):
+    def __init__(
+        self,
+        output_dir: str = "data/quiz_images",
+        theme: str = "light",
+        t2i_enabled: bool = False,
+        t2i_endpoint: str = "",
+        t2i_max_concurrent: int = 1,
+    ):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         self.theme = (theme or "light").strip().lower()
 
-        if not HTML2IMAGE_AVAILABLE:
+        # T2I 配置
+        self.t2i_enabled = bool(t2i_enabled)
+        self.t2i_endpoint = str(t2i_endpoint or "").strip().rstrip("/") if t2i_endpoint else ""
+        self._t2i_semaphore = asyncio.Semaphore(max(1, int(t2i_max_concurrent or 1)))
+        self._t2i_session: Optional[Any] = None
+
+        if not HTML2IMAGE_AVAILABLE and not self.t2i_enabled:
             raise ImportError(
-                "Html2Image包未安装，无法生成图片。请安装：pip install html2image"
+                "Html2Image包未安装，且未启用 T2I 服务。请安装：pip install html2image 或启用 T2I 配置"
             )
 
         self._avatar_concurrency = 8
@@ -936,10 +949,91 @@ class QnAStatsRenderer:
     def _html_to_image(
         self, html_str: str, filename: str, width: int, height: int
     ) -> str:
+        if self.t2i_enabled and self.t2i_endpoint and AIOHTTP_AVAILABLE:
+            return self._html_to_image_t2i_sync(html_str, filename, width, height)
+        return self._html_to_image_local(html_str, filename, width, height)
+
+    def _html_to_image_local(
+        self, html_str: str, filename: str, width: int, height: int
+    ) -> str:
         hti = Html2Image(output_path=str(self.output_dir))
         out = f"{filename}.png"
         hti.screenshot(html_str=html_str, save_as=out, size=(width, height))
         return str(self.output_dir / out)
+
+    def _html_to_image_t2i_sync(
+        self, html_str: str, filename: str, width: int, height: int
+    ) -> str:
+        """同步包装器：在事件循环中调度异步 T2I 渲染。"""
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if loop is not None and loop.is_running():
+            import concurrent.futures
+
+            future = asyncio.run_coroutine_threadsafe(
+                self._html_to_image_t2i(html_str, filename, width, height), loop
+            )
+            return future.result(timeout=60)
+        return asyncio.run(
+            self._html_to_image_t2i(html_str, filename, width, height)
+        )
+
+    async def _html_to_image_t2i(
+        self, html_str: str, filename: str, width: int, height: int
+    ) -> str:
+        """通过远程 T2I 服务将 HTML 渲染为图片（AstrBot 兼容 API）。"""
+        endpoint = self.t2i_endpoint.rstrip("/")
+        if not endpoint.endswith("text2img"):
+            endpoint = f"{endpoint}/text2img"
+        endpoint = f"{endpoint}/generate"
+
+        payload = {
+            "tmpl": html_str,
+            "json": False,
+            "tmpldata": {},
+            "options": {
+                "full_page": True,
+                "type": "png",
+            },
+        }
+
+        async with self._t2i_semaphore:
+            session = await self._get_t2i_session()
+            async with session.post(endpoint, json=payload, timeout=60) as resp:
+                if resp.status != 200:
+                    text = await resp.text()
+                    raise RuntimeError(f"T2I 服务返回 {resp.status}: {text[:200]}")
+                data = await resp.read()
+                if not data:
+                    raise RuntimeError("T2I 服务返回空数据")
+
+            # 校验图片魔数
+            if not (data.startswith(b"\x89PNG") or data.startswith(b"\xff\xd8")):
+                raise RuntimeError(
+                    f"T2I 返回了非图片数据（头部: {data[:10].hex()}）"
+                )
+
+            out_path = self.output_dir / f"{filename}.png"
+            with open(out_path, "wb") as f:
+                f.write(data)
+            return str(out_path)
+
+    async def _get_t2i_session(self):
+        if self._t2i_session is None or self._t2i_session.closed:
+            import aiohttp
+
+            self._t2i_session = aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=60)
+            )
+        return self._t2i_session
+
+    async def close_t2i(self):
+        """释放 T2I 会话资源。"""
+        if self._t2i_session and not self._t2i_session.closed:
+            await self._t2i_session.close()
+            self._t2i_session = None
 
     def render_to_image(
         self, body_html: str, filename: str, title: str, height: int

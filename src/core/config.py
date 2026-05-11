@@ -59,6 +59,13 @@ class AliasSettings:
 
 
 @dataclass(frozen=True)
+class T2ISettings:
+    enabled: bool
+    endpoint: str
+    max_concurrent: int
+
+
+@dataclass(frozen=True)
 class PluginSettings:
     require_admin: bool
     admin_ids: tuple[str, ...]
@@ -77,6 +84,7 @@ class PluginSettings:
     match: MatchSettings
     question: QuestionSettings
     aliases: AliasSettings
+    t2i: T2ISettings
 
 
 def resolve_data_path(raw_path: Any, plugin_dir: Path) -> Path:
@@ -184,5 +192,10 @@ def load_settings(config: Mapping[str, Any], plugin_dir: Path) -> PluginSettings
                 config.get("operator_aliases_path", "arknights_operator_aliases.json"),
                 plugin_dir,
             ),
+        ),
+        t2i=T2ISettings(
+            enabled=bool((config.get("t2i", {}) or {}).get("enabled", False)),
+            endpoint=str((config.get("t2i", {}) or {}).get("endpoint", "") or "").strip(),
+            max_concurrent=int((config.get("t2i", {}) or {}).get("max_concurrent", 1) or 1),
         ),
     )
