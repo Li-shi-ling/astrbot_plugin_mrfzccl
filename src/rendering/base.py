@@ -2,9 +2,10 @@ import asyncio
 import base64
 import html
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any
 
 try:
     from html2image import Html2Image
@@ -44,6 +45,8 @@ class BaseRenderer(ABC):
         t2i_enabled: bool = False,
         t2i_endpoint: str = "",
         t2i_max_concurrent: int = 1,
+        html_render_func: Callable[[str, dict, bool, dict | None], Awaitable[Any]]
+        | None = None,
     ):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -54,8 +57,7 @@ class BaseRenderer(ABC):
             str(t2i_endpoint or "").strip().rstrip("/") if t2i_endpoint else ""
         )
         self._t2i_semaphore = asyncio.Semaphore(max(1, int(t2i_max_concurrent or 1)))
-        self._t2i_session: Optional[Any] = None
-        self._t2i_session_loop: Optional[asyncio.AbstractEventLoop] = None
+        self._html_render_func = html_render_func
 
         if not HTML2IMAGE_AVAILABLE and not self.t2i_enabled:
             raise ImportError(
@@ -139,7 +141,7 @@ class BaseRenderer(ABC):
 
     async def _fetch_avatar_data_url(
         self, session: "aiohttp.ClientSession", user_id: str
-    ) -> Optional[str]:
+    ) -> str | None:
         try:
             url = self._avatar_url(user_id)
             async with session.get(url) as resp:
@@ -161,12 +163,12 @@ class BaseRenderer(ABC):
         except Exception:
             return None
 
-    async def _download_avatar_map(self, user_ids: List[Any]) -> Dict[str, str]:
+    async def _download_avatar_map(self, user_ids: list[Any]) -> dict[str, str]:
         """
         并行下载头像并返回 data-url 映射。
         - 下载失败：不返回该 key（调用方自行降级为首字头像）
         """
-        unique_ids: List[str] = []
+        unique_ids: list[str] = []
         seen: set[str] = set()
         for raw_id in user_ids:
             uid = str(raw_id or "").strip()
@@ -190,7 +192,7 @@ class BaseRenderer(ABC):
             timeout=timeout, connector=connector, headers=headers
         ) as session:
 
-            async def worker(uid: str) -> Optional[tuple[str, str]]:
+            async def worker(uid: str) -> tuple[str, str] | None:
                 async with sem:
                     data_url = await self._fetch_avatar_data_url(session, uid)
                     if not data_url:
@@ -201,7 +203,7 @@ class BaseRenderer(ABC):
                 *(worker(uid) for uid in unique_ids), return_exceptions=False
             )
 
-        avatar_map: Dict[str, str] = {}
+        avatar_map: dict[str, str] = {}
         for item in results:
             if not item:
                 continue
@@ -886,16 +888,37 @@ class BaseRenderer(ABC):
         self, html_str: str, filename: str, width: int, height: int
     ) -> str:
         try:
-            if self.t2i_enabled and self.t2i_endpoint and AIOHTTP_AVAILABLE:
-                return self._html_to_image_t2i_sync(html_str, filename, width, height)
             return self._html_to_image_local(html_str, filename, width, height)
         except Exception:
             import traceback as _tb
+
             from astrbot.api import logger as _logger
 
             _logger.error(f"[渲染] HTML 转图片失败: filename={filename}")
             _logger.error(_tb.format_exc())
             raise
+
+    async def _render_html_to_image(
+        self, html_str: str, filename: str, width: int, height: int
+    ) -> str:
+        if self.t2i_enabled and self._html_render_func is not None:
+            try:
+                return await self._html_to_image_t2i(html_str, filename, width, height)
+            except Exception:
+                if not HTML2IMAGE_AVAILABLE:
+                    raise
+                from astrbot.api import logger as _logger
+
+                _logger.warning(
+                    "[渲染] T2I 渲染失败，回退到本地 Html2Image: filename=%s",
+                    filename,
+                    exc_info=True,
+                )
+
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, lambda: self._html_to_image_local(html_str, filename, width, height)
+        )
 
     def _html_to_image_t2i_document(
         self, html_str: str, width: int, height: int
@@ -930,122 +953,89 @@ class BaseRenderer(ABC):
         hti.screenshot(html_str=html_str, save_as=out, size=(width, height))
         return str(self.output_dir / out)
 
-    def _html_to_image_t2i_sync(
-        self, html_str: str, filename: str, width: int, height: int
-    ) -> str:
-        """同步包装器：在事件循环中调度异步 T2I 渲染。"""
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
-        if loop is not None and loop.is_running():
-            future = asyncio.run_coroutine_threadsafe(
-                self._html_to_image_t2i(html_str, filename, width, height), loop
-            )
-            return future.result(timeout=60)
-        return asyncio.run(
-            self._html_to_image_t2i_with_ephemeral_session(
-                html_str, filename, width, height
-            )
-        )
-
-    async def _html_to_image_t2i_with_ephemeral_session(
-        self, html_str: str, filename: str, width: int, height: int
-    ) -> str:
-        try:
-            return await self._html_to_image_t2i(html_str, filename, width, height)
-        finally:
-            await self.close_t2i()
-
     async def _html_to_image_t2i(
         self, html_str: str, filename: str, width: int, height: int
     ) -> str:
-        """通过远程 T2I 服务将 HTML 渲染为图片（AstrBot 兼容 API）。"""
-        endpoint = self._normalize_t2i_generate_endpoint(self.t2i_endpoint)
-        t2i_html = self._html_to_image_t2i_document(html_str, width, height)
+        """Render HTML through AstrBot's native html_render T2I chain."""
+        if self._html_render_func is None:
+            raise RuntimeError("T2I rendering requires AstrBot html_render")
 
-        payload = {
-            "tmpl": t2i_html,
-            "json": False,
-            "tmpldata": {},
-            "options": {
-                "full_page": False,
+        from astrbot.api import logger as _logger
+
+        t2i_html = self._html_to_image_t2i_document(html_str, width, height)
+        last_error: Exception | None = None
+        async with self._t2i_semaphore:
+            for image_options in self._t2i_render_strategies():
+                options = dict(image_options)
+                if options.get("type") == "png":
+                    options["quality"] = None
+                try:
+                    result = await self._html_render_func(t2i_html, {}, False, options)
+                    return self._write_t2i_result(result, filename)
+                except Exception as exc:
+                    last_error = exc
+                    _logger.warning(
+                        "[render] T2I strategy failed: options=%s",
+                        options,
+                        exc_info=True,
+                    )
+
+        raise RuntimeError(
+            f"All T2I render strategies failed: {last_error}"
+        ) from last_error
+
+    @staticmethod
+    def _t2i_render_strategies() -> list[dict[str, Any]]:
+        return [
+            {
+                "full_page": True,
                 "type": "png",
-                "viewport": {"width": int(width), "height": int(height)},
-                "clip": {
-                    "x": 0,
-                    "y": 0,
-                    "width": int(width),
-                    "height": int(height),
-                },
+                "scale": "device",
+                "device_scale_factor_level": "ultra",
+            },
+            {
+                "full_page": True,
+                "type": "jpeg",
+                "quality": 100,
+                "scale": "device",
+                "device_scale_factor_level": "ultra",
+            },
+            {
+                "full_page": True,
+                "type": "jpeg",
+                "quality": 95,
                 "scale": "device",
                 "device_scale_factor_level": "high",
             },
-        }
+            {
+                "full_page": True,
+                "type": "jpeg",
+                "quality": 80,
+                "scale": "device",
+            },
+        ]
 
-        async with self._t2i_semaphore:
-            session = await self._get_t2i_session()
-            async with session.post(endpoint, json=payload, timeout=60) as resp:
-                if resp.status != 200:
-                    text = await resp.text()
-                    raise RuntimeError(f"T2I 服务返回 {resp.status}: {text[:200]}")
-                data = await resp.read()
-                if not data:
-                    raise RuntimeError("T2I 服务返回空数据")
-
-            # 校验图片魔数
-            if not (data.startswith(b"\x89PNG") or data.startswith(b"\xff\xd8")):
+    def _write_t2i_result(self, result: Any, filename: str) -> str:
+        if isinstance(result, (bytes, bytearray)):
+            data = bytes(result)
+            if not self._is_image_bytes(data):
                 raise RuntimeError(f"T2I 返回了非图片数据（头部: {data[:10].hex()}）")
-
             out_path = self.output_dir / f"{filename}.png"
             with open(out_path, "wb") as f:
                 f.write(data)
             return str(out_path)
 
+        if isinstance(result, str):
+            path = Path(result)
+            if path.exists():
+                return str(path)
+            raise RuntimeError(f"T2I 返回了不可用的字符串结果: {result[:120]}")
+
+        raise RuntimeError(f"T2I 返回了不支持的数据类型: {type(result).__name__}")
+
     @staticmethod
-    def _normalize_t2i_generate_endpoint(raw_endpoint: str) -> str:
-        endpoint = str(raw_endpoint or "").strip().rstrip("/")
-        if endpoint.endswith("/generate"):
-            return endpoint
-        if not endpoint.endswith("/text2img"):
-            endpoint = f"{endpoint}/text2img"
-        return f"{endpoint}/generate"
-
-    async def _get_t2i_session(self):
-        current_loop = asyncio.get_running_loop()
-        session_loop = self._t2i_session_loop
-        should_replace_session = (
-            self._t2i_session is None
-            or self._t2i_session.closed
-            or session_loop is None
-            or session_loop.is_closed()
-            or session_loop is not current_loop
-        )
-        if should_replace_session:
-            old_session = self._t2i_session
-            old_loop = self._t2i_session_loop
-            if (
-                old_session is not None
-                and not old_session.closed
-                and old_loop is not None
-                and not old_loop.is_closed()
-            ):
-                await old_session.close()
-
-            import aiohttp
-
-            self._t2i_session = aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=60)
-            )
-            self._t2i_session_loop = current_loop
-        return self._t2i_session
-
-    async def close_t2i(self):
-        """释放 T2I 会话资源。"""
-        if self._t2i_session and not self._t2i_session.closed:
-            await self._t2i_session.close()
-        self._t2i_session = None
-        self._t2i_session_loop = None
+    def _is_image_bytes(data: bytes) -> bool:
+        return data.startswith(b"\x89PNG") or data.startswith(b"\xff\xd8")
 
     def render_to_image(
         self, body_html: str, filename: str, title: str, height: int
@@ -1054,10 +1044,19 @@ class BaseRenderer(ABC):
         html_str = self._build_html(body_html, title)
         return self._html_to_image(html_str, filename, self.CARD_WIDTH, height)
 
+    async def render_to_image_async(
+        self, body_html: str, filename: str, title: str, height: int
+    ) -> str:
+        height = int(height) + self._extra_height()
+        html_str = self._build_html(body_html, title)
+        return await self._render_html_to_image(
+            html_str, filename, self.CARD_WIDTH, height
+        )
+
     # ======================= 内容构建（HTML）=======================
     def _build_leaderboard_body(
         self,
-        users: List[UserQnAStats],
+        users: list[UserQnAStats],
         title: str,
         sort_key: str,
         mode: str,
@@ -1098,7 +1097,7 @@ class BaseRenderer(ABC):
 
         th_html = "".join(f"<th>{self._esc(h)}</th>" for h in headers)
 
-        row_html_parts: List[str] = []
+        row_html_parts: list[str] = []
         for idx, u in enumerate(sorted_users, 1):
             correct = self._safe_int(getattr(u, "correct_count", 0))
             wrong = self._safe_int(getattr(u, "wrong_count", 0))
@@ -1170,7 +1169,7 @@ class BaseRenderer(ABC):
 
     def _build_match_leaderboard_body(
         self,
-        participants: List[MatchParticipant],
+        participants: list[MatchParticipant],
         title: str,
         avatar_map: Mapping[str, str],
     ) -> str:
@@ -1204,7 +1203,7 @@ class BaseRenderer(ABC):
 
         th_html = "".join(f"<th>{self._esc(h)}</th>" for h in headers)
 
-        row_html_parts: List[str] = []
+        row_html_parts: list[str] = []
         for idx, p in enumerate(sorted_participants, 1):
             correct = self._safe_int(getattr(p, "correct_count", 0))
             wrong = self._safe_int(getattr(p, "wrong_count", 0))
@@ -1282,7 +1281,7 @@ class BaseRenderer(ABC):
 
     # ======================= 公开接口 =======================
     async def generate_correct_leaderboard_image(
-        self, users: List[UserQnAStats]
+        self, users: list[UserQnAStats]
     ) -> str:
         avatar_map = await self._download_avatar_map(
             [getattr(u, "user_id", "") for u in users]
@@ -1296,13 +1295,9 @@ class BaseRenderer(ABC):
         )
         height = self._calc_table_height(len(users))
         name = f"correct_leaderboard_{datetime.now():%Y%m%d_%H%M%S}"
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None,
-            lambda: self.render_to_image(body, name, "正确次数排行榜", height),
-        )
+        return await self.render_to_image_async(body, name, "正确次数排行榜", height)
 
-    async def generate_wrong_leaderboard_image(self, users: List[UserQnAStats]) -> str:
+    async def generate_wrong_leaderboard_image(self, users: list[UserQnAStats]) -> str:
         avatar_map = await self._download_avatar_map(
             [getattr(u, "user_id", "") for u in users]
         )
@@ -1315,13 +1310,9 @@ class BaseRenderer(ABC):
         )
         height = self._calc_table_height(len(users))
         name = f"wrong_leaderboard_{datetime.now():%Y%m%d_%H%M%S}"
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None,
-            lambda: self.render_to_image(body, name, "错误次数排行榜", height),
-        )
+        return await self.render_to_image_async(body, name, "错误次数排行榜", height)
 
-    async def generate_hints_leaderboard_image(self, users: List[UserQnAStats]) -> str:
+    async def generate_hints_leaderboard_image(self, users: list[UserQnAStats]) -> str:
         avatar_map = await self._download_avatar_map(
             [getattr(u, "user_id", "") for u in users]
         )
@@ -1334,17 +1325,13 @@ class BaseRenderer(ABC):
         )
         height = self._calc_table_height(len(users))
         name = f"hints_leaderboard_{datetime.now():%Y%m%d_%H%M%S}"
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None,
-            lambda: self.render_to_image(body, name, "提示次数排行榜", height),
-        )
+        return await self.render_to_image_async(body, name, "提示次数排行榜", height)
 
     async def generate_match_leaderboard_image(
         self,
         match_name: str,
-        participants: List[MatchParticipant],
-        title: Optional[str] = None,
+        participants: list[MatchParticipant],
+        title: str | None = None,
     ) -> str:
         participants = list(participants or [])
         title_text = title or f"比赛「{match_name}」排行榜"
@@ -1354,17 +1341,13 @@ class BaseRenderer(ABC):
         body = self._build_match_leaderboard_body(participants, title_text, avatar_map)
         height = self._calc_table_height(len(participants))
         name = f"match_leaderboard_{datetime.now():%Y%m%d_%H%M%S}"
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None,
-            lambda: self.render_to_image(body, name, title_text, height),
-        )
+        return await self.render_to_image_async(body, name, title_text, height)
 
     async def generate_user_profile_image(
         self,
         user_stats: UserQnAStats,
         rank_info: Mapping[str, Any],
-        honors: Optional[List[MatchHonor]] = None,
+        honors: list[MatchHonor] | None = None,
     ) -> str:
         avatar_map = await self._download_avatar_map(
             [getattr(user_stats, "user_id", "")]
@@ -1383,17 +1366,13 @@ class BaseRenderer(ABC):
                 self.USER_PROFILE_HONOR_BASE_HEIGHT
                 + len(honor_list) * self.USER_PROFILE_HONOR_ROW_HEIGHT
             )
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None,
-            lambda: self.render_to_image(body, name, "用户信息", height),
-        )
+        return await self.render_to_image_async(body, name, "用户信息", height)
 
-    def _build_user_honor_section(self, honors: List[MatchHonor]) -> str:
+    def _build_user_honor_section(self, honors: list[MatchHonor]) -> str:
         if not honors:
             return ""
 
-        row_html_parts: List[str] = []
+        row_html_parts: list[str] = []
         for h in honors[: self.USER_PROFILE_HONOR_MAX]:
             medal = getattr(h, "medal", "")
             match_name = getattr(h, "match_name", "-")
@@ -1443,8 +1422,8 @@ class BaseRenderer(ABC):
         self,
         u: UserQnAStats,
         rank: Mapping[str, Any],
-        avatar_data_url: Optional[str],
-        honors: Optional[List[MatchHonor]] = None,
+        avatar_data_url: str | None,
+        honors: list[MatchHonor] | None = None,
     ) -> str:
         user_name_raw = getattr(u, "user_name", "-")
         user_id_raw = getattr(u, "user_id", "-")

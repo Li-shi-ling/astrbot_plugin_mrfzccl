@@ -1,5 +1,10 @@
 ## 更新日志
 
+### 1.2.42
+- 严格对齐群日报插件调用链路：通过注入的 AstrBot `html_render` 调用 T2I，不再自建 T2I HTTP 请求
+- 复用参考插件的多策略渲染参数（PNG ultra -> JPEG ultra/high/normal），并保持 `return_url=False` 获取图片数据
+- 远程失败时仅回退本地 `Html2Image`，保留固定尺寸 HTML 以避免全屏截图影响高度
+
 ### 1.2.40
 - ✅ 修复远程 T2I 连续渲染时复用已关闭事件循环上的 `aiohttp.ClientSession` 导致 `Event loop is closed` 的问题
 

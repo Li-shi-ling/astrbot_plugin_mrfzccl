@@ -225,7 +225,7 @@
         "description": "T2I 服务地址",
         "type": "string",
         "default": "",
-        "hint": "留空时自动读取 AstrBot 系统配置 t2i_endpoint；也可手动填写 http://127.0.0.1:8000/text2img/generate 或 http://127.0.0.1:8000"
+        "hint": "T2I 调用链路使用 AstrBot 原生 html_render，实际服务地址请在 AstrBot 系统配置 t2i_endpoint 中维护；本字段保留用于兼容旧配置"
       },
       "max_concurrent": {
         "description": "最大 T2I 渲染并发数",
