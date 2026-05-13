@@ -938,15 +938,34 @@ class BaseRenderer(ABC):
             width: {int(width)}px !important;
             min-width: {int(width)}px !important;
             max-width: {int(width)}px !important;
-            height: {int(height)}px !important;
-            min-height: {int(height)}px !important;
-            max-height: {int(height)}px !important;
-            overflow: hidden !important;
+            height: auto !important;
+            min-height: 0 !important;
+            max-height: none !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            overflow: visible !important;
         }}
-        .content-container,
-        .page,
+        .content-container {{
+            width: {int(width)}px !important;
+            min-width: {int(width)}px !important;
+            max-width: {int(width)}px !important;
+            height: auto !important;
+            min-height: 0 !important;
+            max-height: none !important;
+            overflow: visible !important;
+        }}
+        .page {{
+            width: 100% !important;
+            height: auto !important;
+            min-height: 0 !important;
+            max-height: none !important;
+            overflow: visible !important;
+        }}
         .card {{
-            min-height: 100% !important;
+            width: 100% !important;
+            height: auto !important;
+            min-height: 0 !important;
+            max-height: none !important;
         }}
         </style>
         """
