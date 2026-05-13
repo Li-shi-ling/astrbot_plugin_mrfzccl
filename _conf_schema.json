@@ -208,7 +208,8 @@
     "description": "问答统计图片主题",
     "type": "string",
     "default": "light",
-    "hint": "可选：light(浅色)、industrial(深色)、retro_win(复古Win)"
+    "options": ["light", "industrial", "retro_win"],
+    "hint": "light=浅色，industrial=深色，retro_win=复古 Win"
   },
   "t2i": {
     "description": "网络 T2I 服务配置",

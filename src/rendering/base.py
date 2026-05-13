@@ -1114,7 +1114,7 @@ class BaseRenderer(ABC):
                     )
                     return str(image_path)
 
-                cropped = source.crop(bbox)
+                cropped = self._trim_t2i_trailing_light_edges(source.crop(bbox))
                 out_path = self.output_dir / f"{filename}.png"
                 cropped.save(out_path)
                 _logger.info(
@@ -1169,6 +1169,35 @@ class BaseRenderer(ABC):
         diff = ImageChops.difference(image, background_image).convert("L")
         mask = diff.point(lambda value: 255 if value > 12 else 0)
         return mask.getbbox()
+
+    @staticmethod
+    def _trim_t2i_trailing_light_edges(image: Any) -> Any:
+        width, height = image.size
+        rgb = image.convert("RGB")
+
+        def has_dark_pixel_in_column(x: int) -> bool:
+            step = max(1, height // 100)
+            return any(min(rgb.getpixel((x, y))) < 210 for y in range(0, height, step))
+
+        def has_dark_pixel_in_row(y: int) -> bool:
+            step = max(1, width // 100)
+            return any(min(rgb.getpixel((x, y))) < 210 for x in range(0, width, step))
+
+        right = width
+        for x in range(width - 1, -1, -1):
+            if has_dark_pixel_in_column(x):
+                right = x + 1
+                break
+
+        bottom = height
+        for y in range(height - 1, -1, -1):
+            if has_dark_pixel_in_row(y):
+                bottom = y + 1
+                break
+
+        if right <= 0 or bottom <= 0 or (right == width and bottom == height):
+            return image
+        return image.crop((0, 0, right, bottom))
 
     def render_to_image(
         self, body_html: str, filename: str, title: str, height: int
