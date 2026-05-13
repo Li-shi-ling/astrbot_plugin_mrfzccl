@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 LLM_JUDGE_MAX_RETRIES_HARD_LIMIT = 5
 DEFAULT_LLM_JUDGE_PROMPT = (
@@ -13,39 +14,6 @@ DEFAULT_LLM_JUDGE_PROMPT = (
 
 def _as_dict(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
-
-
-def _config_get(config: Any, key: str, default: Any = None) -> Any:
-    if hasattr(config, "get"):
-        try:
-            return config.get(key, default)
-        except TypeError:
-            try:
-                return config.get(key)
-            except Exception:
-                return default
-        except Exception:
-            return default
-    return getattr(config, key, default)
-
-
-def _first_text(*values: Any) -> str:
-    for value in values:
-        text = str(value or "").strip()
-        if text:
-            return text
-    return ""
-
-
-def _default_t2i_endpoint() -> str:
-    try:
-        from astrbot.core.utils.t2i.network_strategy import (
-            ASTRBOT_T2I_DEFAULT_ENDPOINT,
-        )
-
-        return str(ASTRBOT_T2I_DEFAULT_ENDPOINT)
-    except Exception:
-        return "https://t2i.soulter.top/text2img"
 
 
 @dataclass(frozen=True)
@@ -94,7 +62,6 @@ class AliasSettings:
 @dataclass(frozen=True)
 class T2ISettings:
     enabled: bool
-    endpoint: str
     max_concurrent: int
 
 
@@ -143,12 +110,7 @@ def load_settings(
     llm_config = _as_dict(config.get("llm_judge", {}))
     retry_config = _as_dict(config.get("image_download_retry", {}))
     t2i_config = _as_dict(config.get("t2i", {}))
-    system_t2i_endpoint = _config_get(system_config, "t2i_endpoint", "")
-    t2i_endpoint = _first_text(
-        t2i_config.get("endpoint"),
-        system_t2i_endpoint,
-        _default_t2i_endpoint(),
-    )
+    t2i_enabled = bool(t2i_config.get("enabled", True))
 
     configured_retries = int(llm_config.get("max_retries", 0) or 0)
     llm_max_retries = max(0, min(configured_retries, LLM_JUDGE_MAX_RETRIES_HARD_LIMIT))
@@ -240,8 +202,7 @@ def load_settings(
             ),
         ),
         t2i=T2ISettings(
-            enabled=bool(t2i_config.get("enabled", True)),
-            endpoint=t2i_endpoint,
+            enabled=t2i_enabled,
             max_concurrent=int(t2i_config.get("max_concurrent", 1) or 1),
         ),
     )

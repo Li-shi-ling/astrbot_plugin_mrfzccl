@@ -43,7 +43,6 @@ class BaseRenderer(ABC):
         self,
         output_dir: str = "data/quiz_images",
         t2i_enabled: bool = False,
-        t2i_endpoint: str = "",
         t2i_max_concurrent: int = 1,
         html_render_func: Callable[[str, dict, bool, dict | None], Awaitable[Any]]
         | None = None,
@@ -53,9 +52,6 @@ class BaseRenderer(ABC):
 
         # T2I 配置
         self.t2i_enabled = bool(t2i_enabled)
-        self.t2i_endpoint = (
-            str(t2i_endpoint or "").strip().rstrip("/") if t2i_endpoint else ""
-        )
         self._t2i_semaphore = asyncio.Semaphore(max(1, int(t2i_max_concurrent or 1)))
         self._html_render_func = html_render_func
 

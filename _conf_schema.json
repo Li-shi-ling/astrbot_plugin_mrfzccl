@@ -219,13 +219,7 @@
         "description": "是否启用网络 T2I 渲染",
         "type": "bool",
         "default": true,
-        "hint": "开启后优先使用远程 T2I 服务，默认自动读取 AstrBot 系统配置里的 t2i_endpoint，失败时回退到本地渲染"
-      },
-      "endpoint": {
-        "description": "T2I 服务地址",
-        "type": "string",
-        "default": "",
-        "hint": "T2I 调用链路使用 AstrBot 原生 html_render，实际服务地址请在 AstrBot 系统配置 t2i_endpoint 中维护；本字段保留用于兼容旧配置"
+        "hint": "开启后通过 AstrBot 原生 html_render 使用系统 T2I 服务，失败时回退到本地渲染"
       },
       "max_concurrent": {
         "description": "最大 T2I 渲染并发数",

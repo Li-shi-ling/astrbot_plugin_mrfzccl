@@ -1,5 +1,13 @@
 ## 更新日志
 
+### 1.2.44
+- 将 T2I 开关保留在 `t2i.enabled`，`t2i` 分组继续承载开关和并发参数
+- 保持插件侧 `t2i.endpoint` 删除状态，服务地址仍由 AstrBot 系统配置管理
+
+### 1.2.43
+- 移除插件侧 `t2i.endpoint` 配置项，T2I 服务地址完全交给 AstrBot 系统配置 `t2i_endpoint`
+- 将 T2I 开关提升为顶层 `t2i_enabled`，`t2i` 分组仅保留并发等渲染参数
+
 ### 1.2.42
 - 严格对齐群日报插件调用链路：通过注入的 AstrBot `html_render` 调用 T2I，不再自建 T2I HTTP 请求
 - 复用参考插件的多策略渲染参数（PNG ultra -> JPEG ultra/high/normal），并保持 `return_url=False` 获取图片数据
