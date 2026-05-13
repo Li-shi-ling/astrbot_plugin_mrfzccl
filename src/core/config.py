@@ -15,6 +15,39 @@ def _as_dict(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
 
 
+def _config_get(config: Any, key: str, default: Any = None) -> Any:
+    if hasattr(config, "get"):
+        try:
+            return config.get(key, default)
+        except TypeError:
+            try:
+                return config.get(key)
+            except Exception:
+                return default
+        except Exception:
+            return default
+    return getattr(config, key, default)
+
+
+def _first_text(*values: Any) -> str:
+    for value in values:
+        text = str(value or "").strip()
+        if text:
+            return text
+    return ""
+
+
+def _default_t2i_endpoint() -> str:
+    try:
+        from astrbot.core.utils.t2i.network_strategy import (
+            ASTRBOT_T2I_DEFAULT_ENDPOINT,
+        )
+
+        return str(ASTRBOT_T2I_DEFAULT_ENDPOINT)
+    except Exception:
+        return "https://t2i.soulter.top/text2img"
+
+
 @dataclass(frozen=True)
 class LlmJudgeSettings:
     enabled: bool
@@ -102,14 +135,23 @@ def resolve_alias_path(raw_path: Any, plugin_dir: Path) -> Path:
     return plugin_dir / path
 
 
-def load_settings(config: Mapping[str, Any], plugin_dir: Path) -> PluginSettings:
+def load_settings(
+    config: Mapping[str, Any],
+    plugin_dir: Path,
+    system_config: Any = None,
+) -> PluginSettings:
     llm_config = _as_dict(config.get("llm_judge", {}))
     retry_config = _as_dict(config.get("image_download_retry", {}))
+    t2i_config = _as_dict(config.get("t2i", {}))
+    system_t2i_endpoint = _config_get(system_config, "t2i_endpoint", "")
+    t2i_endpoint = _first_text(
+        t2i_config.get("endpoint"),
+        system_t2i_endpoint,
+        _default_t2i_endpoint(),
+    )
 
     configured_retries = int(llm_config.get("max_retries", 0) or 0)
-    llm_max_retries = max(
-        0, min(configured_retries, LLM_JUDGE_MAX_RETRIES_HARD_LIMIT)
-    )
+    llm_max_retries = max(0, min(configured_retries, LLM_JUDGE_MAX_RETRIES_HARD_LIMIT))
 
     low_weight_raw = str(
         config.get("low_weight_characters", "预备干员,机师,W,SideStory")
@@ -168,7 +210,9 @@ def load_settings(config: Mapping[str, Any], plugin_dir: Path) -> PluginSettings
             question_limit=int(config.get("match_question_limit", 0) or 0),
             time_limit=int(config.get("match_time_limit", 0) or 0),
             hint_delay=int(config.get("match_hint_delay", 0) or 0),
-            answer_grace_period=float(config.get("match_answer_grace_period", 3.0) or 0),
+            answer_grace_period=float(
+                config.get("match_answer_grace_period", 3.0) or 0
+            ),
         ),
         question=QuestionSettings(
             low_weight_keywords=low_weight_keywords,
@@ -187,15 +231,17 @@ def load_settings(config: Mapping[str, Any], plugin_dir: Path) -> PluginSettings
                 )
                 or ""
             ),
-            character_aliases_json=str(config.get("character_aliases_json", "{}") or "{}"),
+            character_aliases_json=str(
+                config.get("character_aliases_json", "{}") or "{}"
+            ),
             operator_aliases_path=resolve_alias_path(
                 config.get("operator_aliases_path", "arknights_operator_aliases.json"),
                 plugin_dir,
             ),
         ),
         t2i=T2ISettings(
-            enabled=bool((config.get("t2i", {}) or {}).get("enabled", False)),
-            endpoint=str((config.get("t2i", {}) or {}).get("endpoint", "") or "").strip(),
-            max_concurrent=int((config.get("t2i", {}) or {}).get("max_concurrent", 1) or 1),
+            enabled=bool(t2i_config.get("enabled", True)),
+            endpoint=t2i_endpoint,
+            max_concurrent=int(t2i_config.get("max_concurrent", 1) or 1),
         ),
     )

@@ -50,7 +50,9 @@ class BaseRenderer(ABC):
 
         # T2I 配置
         self.t2i_enabled = bool(t2i_enabled)
-        self.t2i_endpoint = str(t2i_endpoint or "").strip().rstrip("/") if t2i_endpoint else ""
+        self.t2i_endpoint = (
+            str(t2i_endpoint or "").strip().rstrip("/") if t2i_endpoint else ""
+        )
         self._t2i_semaphore = asyncio.Semaphore(max(1, int(t2i_max_concurrent or 1)))
         self._t2i_session: Optional[Any] = None
 
@@ -889,9 +891,35 @@ class BaseRenderer(ABC):
         except Exception:
             import traceback as _tb
             from astrbot.api import logger as _logger
+
             _logger.error(f"[渲染] HTML 转图片失败: filename={filename}")
             _logger.error(_tb.format_exc())
             raise
+
+    def _html_to_image_t2i_document(
+        self, html_str: str, width: int, height: int
+    ) -> str:
+        fixed_size_css = f"""
+        <style id="mrfzccl-t2i-fixed-size">
+        html, body {{
+            width: {int(width)}px !important;
+            min-width: {int(width)}px !important;
+            max-width: {int(width)}px !important;
+            height: {int(height)}px !important;
+            min-height: {int(height)}px !important;
+            max-height: {int(height)}px !important;
+            overflow: hidden !important;
+        }}
+        .content-container,
+        .page,
+        .card {{
+            min-height: 100% !important;
+        }}
+        </style>
+        """
+        if "</head>" in html_str:
+            return html_str.replace("</head>", f"{fixed_size_css}</head>", 1)
+        return fixed_size_css + html_str
 
     def _html_to_image_local(
         self, html_str: str, filename: str, width: int, height: int
@@ -916,26 +944,31 @@ class BaseRenderer(ABC):
                 self._html_to_image_t2i(html_str, filename, width, height), loop
             )
             return future.result(timeout=60)
-        return asyncio.run(
-            self._html_to_image_t2i(html_str, filename, width, height)
-        )
+        return asyncio.run(self._html_to_image_t2i(html_str, filename, width, height))
 
     async def _html_to_image_t2i(
         self, html_str: str, filename: str, width: int, height: int
     ) -> str:
         """通过远程 T2I 服务将 HTML 渲染为图片（AstrBot 兼容 API）。"""
-        endpoint = self.t2i_endpoint.rstrip("/")
-        if not endpoint.endswith("text2img"):
-            endpoint = f"{endpoint}/text2img"
-        endpoint = f"{endpoint}/generate"
+        endpoint = self._normalize_t2i_generate_endpoint(self.t2i_endpoint)
+        t2i_html = self._html_to_image_t2i_document(html_str, width, height)
 
         payload = {
-            "tmpl": html_str,
+            "tmpl": t2i_html,
             "json": False,
             "tmpldata": {},
             "options": {
-                "full_page": True,
+                "full_page": False,
                 "type": "png",
+                "viewport": {"width": int(width), "height": int(height)},
+                "clip": {
+                    "x": 0,
+                    "y": 0,
+                    "width": int(width),
+                    "height": int(height),
+                },
+                "scale": "device",
+                "device_scale_factor_level": "high",
             },
         }
 
@@ -951,14 +984,21 @@ class BaseRenderer(ABC):
 
             # 校验图片魔数
             if not (data.startswith(b"\x89PNG") or data.startswith(b"\xff\xd8")):
-                raise RuntimeError(
-                    f"T2I 返回了非图片数据（头部: {data[:10].hex()}）"
-                )
+                raise RuntimeError(f"T2I 返回了非图片数据（头部: {data[:10].hex()}）")
 
             out_path = self.output_dir / f"{filename}.png"
             with open(out_path, "wb") as f:
                 f.write(data)
             return str(out_path)
+
+    @staticmethod
+    def _normalize_t2i_generate_endpoint(raw_endpoint: str) -> str:
+        endpoint = str(raw_endpoint or "").strip().rstrip("/")
+        if endpoint.endswith("/generate"):
+            return endpoint
+        if not endpoint.endswith("/text2img"):
+            endpoint = f"{endpoint}/text2img"
+        return f"{endpoint}/generate"
 
     async def _get_t2i_session(self):
         if self._t2i_session is None or self._t2i_session.closed:
