@@ -1050,12 +1050,12 @@ class BaseRenderer(ABC):
             out_path = self.output_dir / f"{filename}.png"
             with open(out_path, "wb") as f:
                 f.write(data)
-            return str(out_path)
+            return self._trim_t2i_screenshot_border(out_path, filename)
 
         if isinstance(result, str):
             path = Path(result)
             if path.exists():
-                return str(path)
+                return self._trim_t2i_screenshot_border(path, filename)
             raise RuntimeError(f"T2I 返回了不可用的字符串结果: {result[:120]}")
 
         raise RuntimeError(f"T2I 返回了不支持的数据类型: {type(result).__name__}")
@@ -1063,6 +1063,93 @@ class BaseRenderer(ABC):
     @staticmethod
     def _is_image_bytes(data: bytes) -> bool:
         return data.startswith(b"\x89PNG") or data.startswith(b"\xff\xd8")
+
+    def _trim_t2i_screenshot_border(self, image_path: Path, filename: str) -> str:
+        """Crop remote T2I viewport borders while keeping local Html2Image untouched."""
+        from PIL import Image, UnidentifiedImageError
+
+        from astrbot.api import logger as _logger
+
+        try:
+            with Image.open(image_path) as image:
+                source = image.convert("RGBA")
+                bbox = self._t2i_content_bbox(source)
+                if bbox is None:
+                    _logger.info(
+                        "[渲染] T2I 结果无需裁剪: filename=%s path=%s size=%sx%s reason=no_border",
+                        filename,
+                        image_path,
+                        source.width,
+                        source.height,
+                    )
+                    return str(image_path)
+
+                full_bbox = (0, 0, source.width, source.height)
+                if bbox == full_bbox:
+                    _logger.info(
+                        "[渲染] T2I 结果无需裁剪: filename=%s path=%s size=%sx%s reason=full_content",
+                        filename,
+                        image_path,
+                        source.width,
+                        source.height,
+                    )
+                    return str(image_path)
+
+                cropped = source.crop(bbox)
+                out_path = self.output_dir / f"{filename}.png"
+                cropped.save(out_path)
+                _logger.info(
+                    "[渲染] T2I 结果裁剪白边: filename=%s source=%s original=%sx%s cropped=%sx%s path=%s",
+                    filename,
+                    image_path,
+                    source.width,
+                    source.height,
+                    cropped.width,
+                    cropped.height,
+                    out_path,
+                )
+                return str(out_path)
+        except (OSError, UnidentifiedImageError):
+            _logger.warning(
+                "[渲染] T2I 结果白边裁剪跳过: filename=%s path=%s reason=image_open_failed",
+                filename,
+                image_path,
+                exc_info=True,
+            )
+            return str(image_path)
+
+    @staticmethod
+    def _t2i_content_bbox(image: Any) -> tuple[int, int, int, int] | None:
+        from PIL import Image, ImageChops
+
+        corners = [
+            image.getpixel((0, 0)),
+            image.getpixel((image.width - 1, 0)),
+            image.getpixel((0, image.height - 1)),
+            image.getpixel((image.width - 1, image.height - 1)),
+        ]
+
+        def close(
+            left: tuple[int, ...], right: tuple[int, ...], tolerance: int
+        ) -> bool:
+            return all(
+                abs(int(left_value) - int(right_value)) <= tolerance
+                for left_value, right_value in zip(left, right)
+            )
+
+        background = None
+        for candidate in corners:
+            matches = sum(close(candidate, corner, 8) for corner in corners)
+            if matches >= 2:
+                background = candidate
+                break
+        if background is None:
+            return None
+
+        background_image = Image.new("RGBA", image.size, background)
+        diff = ImageChops.difference(image, background_image).convert("L")
+        mask = diff.point(lambda value: 255 if value > 12 else 0)
+        return mask.getbbox()
 
     def render_to_image(
         self, body_html: str, filename: str, title: str, height: int
