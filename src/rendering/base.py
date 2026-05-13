@@ -897,19 +897,32 @@ class BaseRenderer(ABC):
     async def _render_html_to_image(
         self, html_str: str, filename: str, width: int, height: int
     ) -> str:
+        from astrbot.api import logger as _logger
+
         if self.t2i_enabled and self._html_render_func is not None:
             try:
+                _logger.info(
+                    "[渲染] 图片生成尝试 T2I: filename=%s size=%sx%s",
+                    filename,
+                    width,
+                    height,
+                )
                 return await self._html_to_image_t2i(html_str, filename, width, height)
             except Exception:
                 if not HTML2IMAGE_AVAILABLE:
                     raise
-                from astrbot.api import logger as _logger
 
                 _logger.warning(
                     "[渲染] T2I 渲染失败，回退到本地 Html2Image: filename=%s",
                     filename,
                     exc_info=True,
                 )
+        else:
+            _logger.info(
+                "[渲染] 图片生成使用本地 Html2Image: filename=%s reason=%s",
+                filename,
+                "t2i_disabled" if not self.t2i_enabled else "html_render_missing",
+            )
 
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
@@ -947,7 +960,14 @@ class BaseRenderer(ABC):
         hti = Html2Image(output_path=str(self.output_dir))
         out = f"{filename}.png"
         hti.screenshot(html_str=html_str, save_as=out, size=(width, height))
-        return str(self.output_dir / out)
+        out_path = self.output_dir / out
+
+        from astrbot.api import logger as _logger
+
+        _logger.info(
+            "[渲染] 本地 Html2Image 完成: filename=%s path=%s", filename, out_path
+        )
+        return str(out_path)
 
     async def _html_to_image_t2i(
         self, html_str: str, filename: str, width: int, height: int
@@ -961,17 +981,28 @@ class BaseRenderer(ABC):
         t2i_html = self._html_to_image_t2i_document(html_str, width, height)
         last_error: Exception | None = None
         async with self._t2i_semaphore:
-            for image_options in self._t2i_render_strategies():
+            for index, image_options in enumerate(self._t2i_render_strategies(), 1):
                 options = dict(image_options)
                 if options.get("type") == "png":
                     options["quality"] = None
                 try:
                     result = await self._html_render_func(t2i_html, {}, False, options)
-                    return self._write_t2i_result(result, filename)
+                    path = self._write_t2i_result(result, filename)
+                    _logger.info(
+                        "[渲染] T2I 渲染完成: filename=%s strategy=%s type=%s result=%s path=%s",
+                        filename,
+                        index,
+                        options.get("type"),
+                        type(result).__name__,
+                        path,
+                    )
+                    return path
                 except Exception as exc:
                     last_error = exc
                     _logger.warning(
-                        "[render] T2I strategy failed: options=%s",
+                        "[渲染] T2I 策略失败: filename=%s strategy=%s options=%s",
+                        filename,
+                        index,
                         options,
                         exc_info=True,
                     )
