@@ -3,9 +3,10 @@ from __future__ import annotations
 import asyncio
 import re
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from difflib import SequenceMatcher
-from typing import Any, Mapping
+from typing import Any
 
 from astrbot.api import logger
 from astrbot.api.provider import Provider
@@ -64,7 +65,9 @@ def is_matching_answer(
     return is_correct
 
 
-def should_skip_plain_answer_message(raw_message: str, *, is_wake_command: bool) -> bool:
+def should_skip_plain_answer_message(
+    raw_message: str, *, is_wake_command: bool
+) -> bool:
     message = re.sub(r"\s+", " ", str(raw_message or "").strip())
     if not message:
         return True
@@ -200,7 +203,9 @@ class LlmJudgeService:
 
         for attempt in range(1, max_attempts + 1):
             try:
-                response = await provider.text_chat(prompt=prompt, session_id=session_id)
+                response = await provider.text_chat(
+                    prompt=prompt, session_id=session_id
+                )
                 completion_text = str(getattr(response, "completion_text", "") or "")
                 result = parse_llm_judge_result(completion_text)
                 if result is None:

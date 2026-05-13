@@ -1,20 +1,22 @@
-import os
-import re
-import json
 import asyncio
+import json
+import os
 import random
-from pathlib import Path
-from io import BytesIO
-from datetime import datetime
+import re
 from collections import Counter
-from PIL import Image
-import numpy as np
-from pypinyin import lazy_pinyin, Style
-from typing import Any, Callable, Iterable, Mapping, Optional
+from collections.abc import Callable, Iterable, Mapping
+from datetime import datetime
+from io import BytesIO
+from pathlib import Path
+from typing import Any
 
+import numpy as np
+from PIL import Image
+from pypinyin import Style, lazy_pinyin
+
+import astrbot.api.message_components as Comp
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
-import astrbot.api.message_components as Comp
 
 
 # 计算去重后字符集合的覆盖率。
@@ -76,7 +78,7 @@ def calculate_char_coverage_counter(correct_name: str, guess_text: str) -> float
 
 # 生成正确次数排行榜的文本内容。
 def generate_correct_leaderboard_text(
-    users: Iterable[Any], summary: Optional[Mapping[str, Any]] = None
+    users: Iterable[Any], summary: Mapping[str, Any] | None = None
 ) -> str:
     """生成正确量排行榜文本"""
     users = list(users or [])
@@ -495,20 +497,20 @@ def safe_cancel_task(task: asyncio.Task | None) -> None:
 
 # 解析 LLM 判题输出为布尔结果。
 def parse_llm_judge_result(completion_text: str) -> bool | None:
-    text = str(completion_text or "").strip().lower()
+    text = str(completion_text or "").strip()
     if not text:
         return None
-    text = re.sub(r"^[`\"'\s]+|[`\"'\s]+$", "", text)
-    text = re.sub(r"[.。！？?!]+$", "", text)
-    if text == "true":
-        return True
-    if text == "false":
+
+    tokens = re.findall(
+        r"(?<![A-Za-z])(?:true|false)(?![A-Za-z])",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if not tokens:
+        return None
+    if any(token.lower() == "false" for token in tokens):
         return False
-    if re.fullmatch(r'\{\s*"(result|answer|correct)"\s*:\s*true\s*\}', text):
-        return True
-    if re.fullmatch(r'\{\s*"(result|answer|correct)"\s*:\s*false\s*\}', text):
-        return False
-    return None
+    return any(token.lower() == "true" for token in tokens)
 
 
 # 转换为绝对路径。
