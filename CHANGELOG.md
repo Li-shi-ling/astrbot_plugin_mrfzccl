@@ -1,5 +1,8 @@
 ## 更新日志
 
+### 1.2.40
+- ✅ 修复远程 T2I 连续渲染时复用已关闭事件循环上的 `aiohttp.ClientSession` 导致 `Event loop is closed` 的问题
+
 ### 1.2.39
 - ✅ T2I 网络渲染默认开启，插件端点留空时自动读取 AstrBot 系统配置 `t2i_endpoint`
 - ✅ 修复远程 T2I 默认全屏截图导致排行榜/名片高度计算失效的问题，T2I 分支改为固定 viewport/clip 渲染

@@ -55,6 +55,7 @@ class BaseRenderer(ABC):
         )
         self._t2i_semaphore = asyncio.Semaphore(max(1, int(t2i_max_concurrent or 1)))
         self._t2i_session: Optional[Any] = None
+        self._t2i_session_loop: Optional[asyncio.AbstractEventLoop] = None
 
         if not HTML2IMAGE_AVAILABLE and not self.t2i_enabled:
             raise ImportError(
@@ -938,13 +939,23 @@ class BaseRenderer(ABC):
         except RuntimeError:
             loop = None
         if loop is not None and loop.is_running():
-            import concurrent.futures
-
             future = asyncio.run_coroutine_threadsafe(
                 self._html_to_image_t2i(html_str, filename, width, height), loop
             )
             return future.result(timeout=60)
-        return asyncio.run(self._html_to_image_t2i(html_str, filename, width, height))
+        return asyncio.run(
+            self._html_to_image_t2i_with_ephemeral_session(
+                html_str, filename, width, height
+            )
+        )
+
+    async def _html_to_image_t2i_with_ephemeral_session(
+        self, html_str: str, filename: str, width: int, height: int
+    ) -> str:
+        try:
+            return await self._html_to_image_t2i(html_str, filename, width, height)
+        finally:
+            await self.close_t2i()
 
     async def _html_to_image_t2i(
         self, html_str: str, filename: str, width: int, height: int
@@ -1001,19 +1012,40 @@ class BaseRenderer(ABC):
         return f"{endpoint}/generate"
 
     async def _get_t2i_session(self):
-        if self._t2i_session is None or self._t2i_session.closed:
+        current_loop = asyncio.get_running_loop()
+        session_loop = self._t2i_session_loop
+        should_replace_session = (
+            self._t2i_session is None
+            or self._t2i_session.closed
+            or session_loop is None
+            or session_loop.is_closed()
+            or session_loop is not current_loop
+        )
+        if should_replace_session:
+            old_session = self._t2i_session
+            old_loop = self._t2i_session_loop
+            if (
+                old_session is not None
+                and not old_session.closed
+                and old_loop is not None
+                and not old_loop.is_closed()
+            ):
+                await old_session.close()
+
             import aiohttp
 
             self._t2i_session = aiohttp.ClientSession(
                 timeout=aiohttp.ClientTimeout(total=60)
             )
+            self._t2i_session_loop = current_loop
         return self._t2i_session
 
     async def close_t2i(self):
         """释放 T2I 会话资源。"""
         if self._t2i_session and not self._t2i_session.closed:
             await self._t2i_session.close()
-            self._t2i_session = None
+        self._t2i_session = None
+        self._t2i_session_loop = None
 
     def render_to_image(
         self, body_html: str, filename: str, title: str, height: int
