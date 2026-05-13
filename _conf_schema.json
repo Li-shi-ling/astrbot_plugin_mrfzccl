@@ -138,11 +138,13 @@
   "llm_judge": {
     "description": "LLM 兜底判题配置(仅在前置判题都失败时启用)",
     "type": "object",
+    "hint": "当前置的精确匹配、相似度、字符覆盖率、同音字和别名判题都失败后，才会调用模型进行兜底判断",
     "items": {
       "enabled": {
         "description": "是否启用",
         "type": "bool",
-        "default": false
+        "default": false,
+        "hint": "开启后会在本地判题全部失败时调用所选模型；关闭则完全不使用 LLM 兜底判题"
       },
       "provider_id": {
         "description": "模型选择",
@@ -163,22 +165,26 @@
       "debug": {
         "description": "是否开启调试日志",
         "type": "bool",
-        "default": false
+        "default": false,
+        "hint": "开启后记录 LLM 兜底判题的更多调试信息，便于排查模型输出和判定流程"
       },
       "enable_retry": {
         "description": "是否启动重试机制",
         "type": "bool",
-        "default": false
+        "default": false,
+        "hint": "开启后当模型调用失败或输出无法识别为 true/false 时，会按重试次数再次请求"
       },
       "max_retries": {
         "description": "最大重试次数",
         "type": "int",
-        "default": 0
+        "default": 0,
+        "hint": "额外重试次数；0 表示只请求 1 次，最终仍无法识别时默认判为 false"
       },
       "retry_interval_seconds": {
         "description": "重试间隔",
         "type": "float",
-        "default": 0.0
+        "default": 0.0,
+        "hint": "每次 LLM 兜底判题重试之间的等待秒数；0 表示立即重试"
       }
     }
   },
@@ -190,12 +196,14 @@
       "max_retries": {
         "description": "最大重试次数",
         "type": "int",
-        "default": 2
+        "default": 2,
+        "hint": "图片下载失败后的额外重试次数；0 表示不重试"
       },
       "retry_interval_seconds": {
         "description": "重试间隔秒数",
         "type": "float",
-        "default": 0.5
+        "default": 0.5,
+        "hint": "每次图片下载重试之间的等待秒数，网络不稳定时可适当调大"
       }
     }
   },
