@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import traceback
 from typing import Any, Callable
 
 import astrbot.api.message_components as Comp
+from astrbot.api import logger
 
 from ..tool import (
     generate_correct_leaderboard_text,
@@ -31,6 +33,8 @@ async def generate_image_or_fallback(
         text_message = generate_text_func(*args, **kwargs)
         yield event.plain_result(f"图片生成失败，使用文本模式显示\n\n{text_message}")
     except Exception as render_error:
+        logger.error(f"图片渲染失败: {render_error}")
+        logger.error(traceback.format_exc())
         text_message = generate_text_func(*args, **kwargs)
         yield event.plain_result(
             f"图片生成失败，使用文本模式显示\n错误: {str(render_error)}\n\n{text_message}"

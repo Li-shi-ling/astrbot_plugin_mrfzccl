@@ -1,5 +1,13 @@
 ## 更新日志
 
+### 1.2.38
+- ✅ 修复重构后 `_layout_css()` 丢失导致图片渲染崩溃的严重 bug
+- ✅ 修复渲染异常时静默吞错：添加完整异常栈日志输出
+
+### 1.2.37
+- ✅ 重构渲染模块：抽象基类 `BaseRenderer` + 三个独立子类 `LightRenderer`/`IndustrialRenderer`/`RetroWinRenderer`
+- ✅ 主题 CSS 由子类各自实现，复古主题通过钩子方法覆盖 HTML 结构，消除类内 `if/elif` 分支
+
 ### 1.2.36
 - ✅ 修复 T2I API 调用格式：端点为 `/text2img/generate`，请求体使用标准 AstrBot `{tmpl, json, tmpldata, options}` 格式
 

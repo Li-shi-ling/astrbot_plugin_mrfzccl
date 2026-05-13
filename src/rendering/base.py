@@ -206,7 +206,8 @@ class BaseRenderer(ABC):
             avatar_map[uid] = data_url
         return avatar_map
 
-    # ======================= 尺寸计算 =======================
+    # ======================= 布局样式 =======================
+    def _layout_css(self) -> str:
         return """
         <style>
         *{ box-sizing:border-box; }
@@ -881,9 +882,16 @@ class BaseRenderer(ABC):
     def _html_to_image(
         self, html_str: str, filename: str, width: int, height: int
     ) -> str:
-        if self.t2i_enabled and self.t2i_endpoint and AIOHTTP_AVAILABLE:
-            return self._html_to_image_t2i_sync(html_str, filename, width, height)
-        return self._html_to_image_local(html_str, filename, width, height)
+        try:
+            if self.t2i_enabled and self.t2i_endpoint and AIOHTTP_AVAILABLE:
+                return self._html_to_image_t2i_sync(html_str, filename, width, height)
+            return self._html_to_image_local(html_str, filename, width, height)
+        except Exception:
+            import traceback as _tb
+            from astrbot.api import logger as _logger
+            _logger.error(f"[渲染] HTML 转图片失败: filename={filename}")
+            _logger.error(_tb.format_exc())
+            raise
 
     def _html_to_image_local(
         self, html_str: str, filename: str, width: int, height: int
