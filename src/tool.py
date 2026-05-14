@@ -395,7 +395,15 @@ def merge_alias_maps(*alias_maps: Mapping[str, str]) -> dict[str, str]:
 # 将输入名称解析为正式干员名。
 def resolve_alias(name: str, alias_map: Mapping[str, str]) -> str:
     """将别名解析为正名（若不存在则返回原值）"""
-    return (alias_map or {}).get(name, name)
+    alias_map = alias_map or {}
+    if name in alias_map:
+        return alias_map[name]
+
+    normalized_name = str(name or "").casefold()
+    for alias, resolved_name in alias_map.items():
+        if str(alias or "").casefold() == normalized_name:
+            return resolved_name
+    return name
 
 
 # 从 JSON 文件加载按真名索引的干员别名表。
@@ -446,7 +454,11 @@ def is_exact_operator_alias_match(
     normalized_guess = guess.strip()
     if not normalized_name or not normalized_guess:
         return False
-    return normalized_guess in (aliases_by_name or {}).get(normalized_name, [])
+    normalized_guess_casefold = normalized_guess.casefold()
+    for alias in (aliases_by_name or {}).get(normalized_name, []):
+        if str(alias or "").strip().casefold() == normalized_guess_casefold:
+            return True
+    return False
 
 
 # 获取文本对应的无声调拼音串。

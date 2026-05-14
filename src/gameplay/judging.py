@@ -34,9 +34,11 @@ class MatchSettings:
 def get_answer_match_details(
     answer: str, guess: str, settings: MatchSettings
 ) -> tuple[float, float, bool, bool]:
-    similarity = SequenceMatcher(None, answer, guess).ratio()
-    coverage = calculate_char_coverage_set(answer, guess)
-    exact_match = answer == guess
+    normalized_answer = str(answer or "").casefold()
+    normalized_guess = str(guess or "").casefold()
+    similarity = SequenceMatcher(None, normalized_answer, normalized_guess).ratio()
+    coverage = calculate_char_coverage_set(normalized_answer, normalized_guess)
+    exact_match = normalized_answer == normalized_guess
     homophone_match = check_homophone(
         answer, guess, enable_homophone=settings.enable_homophone
     )

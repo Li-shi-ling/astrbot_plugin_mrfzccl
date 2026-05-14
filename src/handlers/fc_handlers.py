@@ -382,7 +382,7 @@ async def handle_other_fcc(
         return [], None
 
     correct_name = str(player_state.get("name", "") or "")
-    if not correct_name or correct_name not in raw_message:
+    if not correct_name or correct_name.casefold() not in raw_message.casefold():
         return [], None
 
     return await handle_fcc(

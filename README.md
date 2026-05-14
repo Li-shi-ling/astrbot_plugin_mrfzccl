@@ -2,7 +2,7 @@
 
 AstrBot 插件：遮挡干员立绘猜名字，支持单局游戏、排行榜、用户名片和群比赛模式。
 
-当前版本：`2.0.0-beta.1`
+当前版本：`2.0.0-beta.2`
 
 ## 功能概览
 
@@ -27,7 +27,7 @@ AstrBot 插件：遮挡干员立绘猜名字，支持单局游戏、排行榜、
 | `/fcw` | 一次性获取三条提示 | `/fcw` |
 | `/fce` | 强制结束当前题目并显示答案 | `/fce` |
 
-游戏期间如果开启 `enable_other_message_exact_match`，普通聊天消息只要精确包含当前正确答案，也会被判定为答对。通过 @ 或唤醒词触发的消息也会参与该检测；未命中正确答案时不会回复，也不会影响后续消息处理。
+游戏期间如果开启 `enable_other_message_exact_match`，普通聊天消息只要精确包含当前正确答案，也会被判定为答对。通过 @ 或唤醒词触发的消息也会参与该检测；未命中正确答案时不会回复，也不会影响后续消息处理。英文干员名和英文别名会忽略大小写。
 
 ### 统计
 
@@ -181,7 +181,7 @@ dist/astrbot_plugin_mrfzccl-<version>.zip
 当前版本打包产物示例：
 
 ```text
-dist/astrbot_plugin_mrfzccl-v2.0.0-beta.1.zip
+dist/astrbot_plugin_mrfzccl-v2.0.0-beta.2.zip
 ```
 
 ## 数据来源
