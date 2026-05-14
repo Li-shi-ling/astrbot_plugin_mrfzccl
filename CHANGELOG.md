@@ -1,5 +1,9 @@
 ## 更新日志
 
+### 2.0.0-beta.4
+- 新增 `constructivist_people` 问答统计图片主题，参考 `constructivist_people_we_theme` 的构成主义/People We 视觉原型
+- 主题素材迁移到 `assets/constructivist_people` 并做保守压缩，打包继续排除 `cs` 开发素材目录
+
 ### 2.0.0-beta.3
 - 新增 `snowcap_shop` 问答统计图片主题，参考雪雉小店原型的配色、网格、票据边框和装饰素材
 - 主题素材放入 `assets/snowcap_shop` 并压缩大图，打包时不再包含开发用素材目录

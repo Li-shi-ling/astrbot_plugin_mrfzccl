@@ -1,4 +1,8 @@
 from .base import BaseRenderer
+from .constructivist_people import (
+    ConstructivistPeopleRenderer,
+    QnAStatsRendererConstructivist,
+)
 from .industrial import IndustrialRenderer, QnAStatsRendererIndustrial
 from .renderer import LightRenderer, QnAStatsRenderer
 from .retro_win import QnAStatsRendererRetroWin, RetroWinRenderer
@@ -11,9 +15,11 @@ __all__ = [
     "IndustrialRenderer",
     "RetroWinRenderer",
     "SnowcapShopRenderer",
+    "ConstructivistPeopleRenderer",
     # 向后兼容别名
     "QnAStatsRenderer",
     "QnAStatsRendererIndustrial",
     "QnAStatsRendererRetroWin",
     "QnAStatsRendererSnowcapShop",
+    "QnAStatsRendererConstructivist",
 ]
