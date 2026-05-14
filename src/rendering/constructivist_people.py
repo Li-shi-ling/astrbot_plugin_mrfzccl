@@ -26,8 +26,6 @@ def _asset_data_url(filename: str) -> str:
 
 
 class ConstructivistPeopleRenderer(BaseRenderer):
-    """People/We inspired constructivist theme for ranking and profile cards."""
-
     FRAME_EXTRA_HEIGHT = 44
 
     def _extra_height(self) -> int:
@@ -53,10 +51,9 @@ class ConstructivistPeopleRenderer(BaseRenderer):
     def _theme_css(self) -> str:
         home_bg = _asset_data_url("people_we_home_bg.jpg")
         detail_bg = _asset_data_url("people_we_detail_bg.jpg")
-        transition_bg = _asset_data_url("people_we_transition_bg.jpg")
 
         name_label = _asset_data_url("name_label.png")
-        speaker_label = _asset_data_url("speaker_label.png")
+
         red_mark = _asset_data_url("red_brush_mark.png")
         barrage = _asset_data_url("barrage_strip.png")
 
@@ -70,32 +67,20 @@ class ConstructivistPeopleRenderer(BaseRenderer):
           --bg0:#e8e5dc;
           --bg1:#cfcfc9;
 
-          --panel:rgba(239,238,226,0.92);
-          --panel2:rgba(214,215,205,0.90);
-
           --line:#262522;
           --text:#24231f;
           --muted:#6f6c61;
 
           --accent:#9f302a;
-          --accent2:#2b2a26;
 
           --good:#455746;
           --bad:#9f302a;
           --warn:#8f5b3f;
 
-          --glow1: rgba(159,48,42,0.13);
-          --glow2: rgba(34,34,30,0.08);
-
-          --grid: rgba(100,91,82,0.10);
-          --stripe: rgba(159,48,42,0.22);
-
           --people-home:url("{home_bg}");
           --people-detail:url("{detail_bg}");
-          --people-transition:url("{transition_bg}");
 
           --people-name:url("{name_label}");
-          --people-speaker:url("{speaker_label}");
 
           --people-red-mark:url("{red_mark}");
           --people-barrage:url("{barrage}");
@@ -104,20 +89,17 @@ class ConstructivistPeopleRenderer(BaseRenderer):
           --people-frame-large:url("{frame_large}");
         }}
 
-        body.theme-people-we{{
+        body.theme-people-we {{
           font-family:
             "Bahnschrift",
-            "Arial Narrow",
-            "DIN Condensed",
             "Microsoft YaHei",
             "PingFang SC",
-            Arial,
             sans-serif;
 
           letter-spacing:0.01em;
         }}
 
-        body.theme-people-we .content-container{{
+        body.theme-people-we .content-container {{
           padding:22px;
 
           background:
@@ -130,32 +112,7 @@ class ConstructivistPeopleRenderer(BaseRenderer):
             linear-gradient(180deg, var(--bg0), var(--bg1));
         }}
 
-        body.theme-people-we .content-container::before{{
-          background:
-            linear-gradient(
-              to right,
-              rgba(159,48,42,0.13) 1px,
-              transparent 1px
-            ),
-
-            linear-gradient(
-              to bottom,
-              rgba(38,37,34,0.06) 1px,
-              transparent 1px
-            ),
-
-            repeating-linear-gradient(
-              115deg,
-              transparent 0 18px,
-              rgba(42,42,37,0.045) 18px 20px
-            );
-
-          background-size:72px 72px, 72px 72px, auto;
-
-          opacity:1;
-        }}
-
-        body.theme-people-we .card{{
+        body.theme-people-we .card {{
           border:0;
           border-radius:0;
           padding:0;
@@ -163,8 +120,8 @@ class ConstructivistPeopleRenderer(BaseRenderer):
           background:
             linear-gradient(
               180deg,
-              rgba(239,238,226,0.86),
-              rgba(215,216,204,0.84)
+              rgba(239,238,226,0.90),
+              rgba(215,216,204,0.88)
             ),
             var(--people-detail) no-repeat center / cover;
 
@@ -176,32 +133,20 @@ class ConstructivistPeopleRenderer(BaseRenderer):
           overflow:hidden;
         }}
 
-        body.theme-people-we .card::before{{
+        body.theme-people-we .card::before {{
           content:"";
           position:absolute;
           inset:0;
 
           background:
-            var(--people-frame-large) no-repeat center / 96% 96%,
-
-            linear-gradient(
-              90deg,
-              rgba(159,48,42,0.25) 0 1px,
-              transparent 1px
-            ),
-
-            linear-gradient(
-              180deg,
-              rgba(38,37,34,0.10),
-              transparent 28%,
-              rgba(38,37,34,0.16)
-            );
+            var(--people-frame-large)
+            no-repeat center / 96% 96%;
 
           opacity:0.95;
           z-index:0;
         }}
 
-        body.theme-people-we .card::after{{
+        body.theme-people-we .card::after {{
           content:"";
           position:absolute;
 
@@ -223,7 +168,7 @@ class ConstructivistPeopleRenderer(BaseRenderer):
 
         /* 顶栏 */
 
-        body.theme-people-we .peoplewe-topbar{{
+        body.theme-people-we .peoplewe-topbar {{
           height:38px;
 
           display:flex;
@@ -240,8 +185,6 @@ class ConstructivistPeopleRenderer(BaseRenderer):
 
           font-family:
             "Cascadia Mono",
-            "JetBrains Mono",
-            Consolas,
             monospace;
 
           font-size:12px;
@@ -249,24 +192,16 @@ class ConstructivistPeopleRenderer(BaseRenderer):
           text-transform:uppercase;
         }}
 
-        body.theme-people-we .peoplewe-brand{{
-          color:#efeee2;
-        }}
+        /* 主容器 */
 
-        body.theme-people-we .peoplewe-status{{
-          color:#d8d6c7;
-        }}
-
-        /* 主内容 */
-
-        body.theme-people-we .peoplewe-inner{{
+        body.theme-people-we .peoplewe-inner {{
           position:relative;
           padding:22px 22px 16px 22px;
         }}
 
-        /* 左上背景装饰 */
+        /* 左上背景 */
 
-        body.theme-people-we .peoplewe-inner::before{{
+        body.theme-people-we .peoplewe-inner::before {{
           content:"";
           position:absolute;
 
@@ -286,29 +221,7 @@ class ConstructivistPeopleRenderer(BaseRenderer):
           z-index:0;
         }}
 
-        /* 右下角背景 */
-
-        body.theme-people-we .peoplewe-inner::after{{
-          content:"";
-          position:absolute;
-
-          right:22px;
-          bottom:4px;
-
-          width:230px;
-          height:52px;
-
-          background:
-            var(--people-speaker)
-            no-repeat right bottom / contain;
-
-          opacity:0.34;
-
-          pointer-events:none;
-          z-index:0;
-        }}
-
-        /* 内容层级 */
+        /* 所有内容提高层级 */
 
         body.theme-people-we .peoplewe-inner > * {{
           position:relative;
@@ -318,12 +231,10 @@ class ConstructivistPeopleRenderer(BaseRenderer):
         /* Header */
 
         body.theme-people-we .header,
-        body.theme-people-we .profile-head{{
+        body.theme-people-we .profile-head {{
           padding:10px 230px 12px 18px;
 
           min-height:88px;
-
-          align-items:flex-end;
 
           border-left:5px solid #9f302a;
 
@@ -339,7 +250,7 @@ class ConstructivistPeopleRenderer(BaseRenderer):
           z-index:3;
         }}
 
-        body.theme-people-we .kicker{{
+        body.theme-people-we .kicker {{
           display:inline-flex;
 
           background:#262522;
@@ -356,7 +267,7 @@ class ConstructivistPeopleRenderer(BaseRenderer):
         }}
 
         body.theme-people-we .title,
-        body.theme-people-we .profile-title{{
+        body.theme-people-we .profile-title {{
           margin-top:8px;
 
           color:#262522;
@@ -366,44 +277,16 @@ class ConstructivistPeopleRenderer(BaseRenderer):
 
           letter-spacing:-0.04em;
           text-transform:uppercase;
-
-          text-shadow:
-            2px 2px 0 rgba(239,238,226,0.7),
-            4px 4px 0 rgba(159,48,42,0.18);
         }}
 
-        body.theme-people-we .profile-sub{{
+        body.theme-people-we .profile-sub {{
           color:#5f5a4f;
           font-weight:800;
         }}
 
-        /* META */
-
-        body.theme-people-we .meta{{
-          border:2px solid #262522;
-          border-radius:0;
-
-          background:rgba(239,238,226,0.88);
-
-          box-shadow:5px 5px 0 rgba(38,37,34,0.18);
-
-          min-width:96px;
-        }}
-
-        body.theme-people-we .meta-label{{
-          color:#9f302a;
-          font-weight:900;
-          letter-spacing:0.14em;
-        }}
-
-        body.theme-people-we .meta-value{{
-          color:#262522;
-          font-weight:900;
-        }}
-
         /* 分割线 */
 
-        body.theme-people-we .divider{{
+        body.theme-people-we .divider {{
           position:relative;
 
           height:18px;
@@ -420,7 +303,7 @@ class ConstructivistPeopleRenderer(BaseRenderer):
             );
         }}
 
-        body.theme-people-we .divider::before{{
+        body.theme-people-we .divider::before {{
           content:"";
           position:absolute;
 
@@ -440,7 +323,7 @@ class ConstructivistPeopleRenderer(BaseRenderer):
         /* 表格 */
 
         body.theme-people-we table.leaderboard,
-        body.theme-people-we table.honors{{
+        body.theme-people-we table.honors {{
           border:2px solid #262522;
           border-radius:0;
 
@@ -454,7 +337,7 @@ class ConstructivistPeopleRenderer(BaseRenderer):
         }}
 
         body.theme-people-we table.leaderboard thead th,
-        body.theme-people-we table.honors thead th{{
+        body.theme-people-we table.honors thead th {{
           height:42px;
 
           background:#262522;
@@ -467,23 +350,17 @@ class ConstructivistPeopleRenderer(BaseRenderer):
         }}
 
         body.theme-people-we table.leaderboard tbody td,
-        body.theme-people-we table.honors tbody td{{
+        body.theme-people-we table.honors tbody td {{
           border-bottom:1px solid rgba(38,37,34,0.18);
           font-weight:800;
         }}
 
-        body.theme-people-we table.leaderboard tbody tr:nth-child(even),
-        body.theme-people-we table.honors tbody tr:nth-child(even){{
-          background:rgba(159,48,42,0.055);
-        }}
+        /* Rank */
 
-        /* 排名 */
-
-        body.theme-people-we .rank{{
+        body.theme-people-we .rank {{
           min-width:58px;
 
           border:2px solid #262522;
-          border-radius:0;
 
           background:#262522;
           color:#efeee2;
@@ -494,24 +371,19 @@ class ConstructivistPeopleRenderer(BaseRenderer):
           font-weight:900;
         }}
 
-        body.theme-people-we .rank-1{{
+        body.theme-people-we .rank-1 {{
           background:#9f302a;
           color:#fff8ec;
         }}
 
-        body.theme-people-we .rank-3{{
-          color:#f0c17b;
-        }}
-
-        /* 头像 */
+        /* Avatar */
 
         body.theme-people-we .avatar-sm,
-        body.theme-people-we .avatar{{
+        body.theme-people-we .avatar {{
           position:relative;
           z-index:5;
 
           border:2px solid #262522;
-          border-radius:0;
 
           background:#d8d6c7;
           color:#9f302a;
@@ -519,47 +391,43 @@ class ConstructivistPeopleRenderer(BaseRenderer):
           box-shadow:4px 4px 0 rgba(38,37,34,0.18);
         }}
 
-        body.theme-people-we .avatar{{
+        body.theme-people-we .avatar {{
           width:64px;
           height:64px;
           font-size:28px;
         }}
 
-        body.theme-people-we .name{{
+        body.theme-people-we .name {{
           font-weight:900;
-          letter-spacing:0.02em;
         }}
 
-        /* 数值 */
+        /* 数值颜色 */
 
-        body.theme-people-we .num-good{{
+        body.theme-people-we .num-good {{
           color:#455746;
         }}
 
-        body.theme-people-we .num-bad{{
+        body.theme-people-we .num-bad {{
           color:#9f302a;
         }}
 
-        body.theme-people-we .num-warn{{
+        body.theme-people-we .num-warn {{
           color:#8f5b3f;
         }}
 
         /* Progress */
 
         body.theme-people-we .mini-bar,
-        body.theme-people-we .progress-track{{
+        body.theme-people-we .progress-track {{
           height:9px;
 
           border:2px solid #262522;
-          border-radius:0;
 
           background:#d8d6c7;
         }}
 
         body.theme-people-we .mini-fill,
-        body.theme-people-we .progress-fill{{
-          border-radius:0;
-
+        body.theme-people-we .progress-fill {{
           background:
             linear-gradient(
               90deg,
@@ -572,16 +440,15 @@ class ConstructivistPeopleRenderer(BaseRenderer):
 
         body.theme-people-we .panel,
         body.theme-people-we .stat,
-        body.theme-people-we .rank-card{{
+        body.theme-people-we .rank-card {{
           border:2px solid #262522;
-          border-radius:0;
 
           background:rgba(239,238,226,0.82);
 
           box-shadow:7px 7px 0 rgba(38,37,34,0.14);
         }}
 
-        body.theme-people-we .panel{{
+        body.theme-people-we .panel {{
           background:
             linear-gradient(
               180deg,
@@ -594,7 +461,7 @@ class ConstructivistPeopleRenderer(BaseRenderer):
 
         body.theme-people-we .panel-title,
         body.theme-people-we .stat-label,
-        body.theme-people-we .rank-label{{
+        body.theme-people-we .rank-label {{
           display:inline-flex;
 
           padding:3px 8px;
@@ -604,36 +471,22 @@ class ConstructivistPeopleRenderer(BaseRenderer):
 
           font-weight:900;
           letter-spacing:0.16em;
-
-          transform:skewX(-6deg);
         }}
 
         body.theme-people-we .stat-value,
-        body.theme-people-we .rank-value{{
+        body.theme-people-we .rank-value {{
           color:#9f302a;
           font-size:22px;
           font-weight:900;
         }}
 
-        body.theme-people-we .stat.good .stat-value{{
-          color:#455746;
-        }}
-
-        body.theme-people-we .stat.bad .stat-value{{
-          color:#9f302a;
-        }}
-
-        body.theme-people-we .stat.warn .stat-value{{
-          color:#8f5b3f;
-        }}
-
-        body.theme-people-we .grid2{{
+        body.theme-people-we .grid2 {{
           grid-template-columns:1.25fr 0.75fr;
         }}
 
         /* Footer */
 
-        body.theme-people-we .footer{{
+        body.theme-people-we .footer {{
           position:relative;
           z-index:3;
 
@@ -641,17 +494,14 @@ class ConstructivistPeopleRenderer(BaseRenderer):
 
           color:#5f5a4f;
           font-weight:800;
+
+          display:flex;
+          justify-content:space-between;
+          align-items:center;
         }}
 
-        body.theme-people-we .footer .time,
-        body.theme-people-we .footer .timestamp{{
-          position:relative;
-          z-index:4;
-        }}
-
-        body.theme-people-we .footer .tag{{
+        body.theme-people-we .footer .tag {{
           border:2px solid #262522;
-          border-radius:0;
 
           background:#262522;
           color:#efeee2;
