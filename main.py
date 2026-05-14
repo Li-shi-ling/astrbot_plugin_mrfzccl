@@ -23,6 +23,7 @@ from .src.rendering import (
     QnAStatsRenderer,
     QnAStatsRendererIndustrial,
     QnAStatsRendererRetroWin,
+    QnAStatsRendererSnowcapShop,
 )
 from .src.core.runtime import GameRuntime, MatchRuntime
 from .src.tool import (
@@ -62,7 +63,7 @@ import re
 
 
 # 注册插件，指定插件名、作者、描述和版本号
-@register("mrfzccl", "Lishining", "你知道的,我一直是明日方舟高手", "2.0.0-beta.2")
+@register("mrfzccl", "Lishining", "你知道的,我一直是明日方舟高手", "2.0.0-beta.3")
 class Mrfzccl(Star):
     _question_candidate_names: np.ndarray
     _question_candidate_urls: List[List[str]]
@@ -262,7 +263,9 @@ class Mrfzccl(Star):
 
         # 初始化问答统计渲染器
         renderer_theme = self.Config.get("renderer_theme", "light")
-        if renderer_theme in {"retro_win", "retro", "win95", "win"}:
+        if renderer_theme in {"snowcap_shop", "xuezhi_shop", "snowcap", "shop"}:
+            renderer_cls = QnAStatsRendererSnowcapShop
+        elif renderer_theme in {"retro_win", "retro", "win95", "win"}:
             renderer_cls = QnAStatsRendererRetroWin
         elif renderer_theme in {"industrial", "dark"}:
             renderer_cls = QnAStatsRendererIndustrial

@@ -57,8 +57,8 @@
     "description": "问答统计图片主题",
     "type": "string",
     "default": "light",
-    "options": ["light", "industrial", "retro_win"],
-    "hint": "light=浅色，industrial=深色，retro_win=复古 Win"
+    "options": ["light", "industrial", "retro_win", "snowcap_shop"],
+    "hint": "light=浅色，industrial=深色，retro_win=复古 Win，snowcap_shop=雪雉小店"
   },
   "daily_game_limit": {
     "description": "每个用户每日开启游戏次数限制",

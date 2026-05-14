@@ -2,7 +2,7 @@
 
 AstrBot 插件：遮挡干员立绘猜名字，支持单局游戏、排行榜、用户名片和群比赛模式。
 
-当前版本：`2.0.0-beta.2`
+当前版本：`2.0.0-beta.3`
 
 ## 功能概览
 
@@ -13,7 +13,8 @@ AstrBot 插件：遮挡干员立绘猜名字，支持单局游戏、排行榜、
 - 支持群比赛模式：题数限制、时间限制、自动提示、自动结算。
 - 支持多种判题方式：精确匹配、相似度、字符覆盖率、同音字、干员别名、LLM 兜底判题。
 - 支持网络 T2I 渲染排行榜/名片图片，失败时回退本地 Html2Image。
-- 问答统计图片支持 `light`、`industrial`、`retro_win` 三种主题。
+- 问答统计图片支持 `light`、`industrial`、`retro_win`、`snowcap_shop` 四种主题。
+- `snowcap_shop` 主题素材位于 `assets/snowcap_shop`。
 
 ## 命令
 
@@ -150,7 +151,7 @@ LLM 输出解析规则：
 
 | 配置项 | 说明 |
 |---|---|
-| `renderer_theme` | 问答统计图片主题，可选 `light`、`industrial`、`retro_win` |
+| `renderer_theme` | 问答统计图片主题，可选 `light`、`industrial`、`retro_win`、`snowcap_shop` |
 | `image_download_retry.max_retries` | bilibili wiki 图片下载失败后的额外重试次数 |
 | `image_download_retry.retry_interval_seconds` | 图片下载重试间隔秒数 |
 | `t2i.enabled` | 是否启用网络 T2I 渲染，默认开启 |
@@ -181,7 +182,7 @@ dist/astrbot_plugin_mrfzccl-<version>.zip
 当前版本打包产物示例：
 
 ```text
-dist/astrbot_plugin_mrfzccl-v2.0.0-beta.2.zip
+dist/astrbot_plugin_mrfzccl-v2.0.0-beta.3.zip
 ```
 
 ## 数据来源

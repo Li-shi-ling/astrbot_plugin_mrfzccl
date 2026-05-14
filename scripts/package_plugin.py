@@ -8,6 +8,10 @@ from pathlib import Path
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT_DIR = PLUGIN_ROOT / "dist"
+EXTRA_PACKAGE_PATHS = (
+    Path("assets/snowcap_shop"),
+    Path("src/rendering/snowcap_shop.py"),
+)
 
 
 def main() -> int:
@@ -82,7 +86,18 @@ def list_tracked_files() -> list[Path]:
         capture_output=True,
     )
     paths = [Path(item.decode("utf-8")) for item in result.stdout.split(b"\0") if item]
-    return sorted(paths, key=lambda path: path.as_posix())
+    for extra_path in EXTRA_PACKAGE_PATHS:
+        source_path = PLUGIN_ROOT / extra_path
+        if source_path.is_file():
+            paths.append(extra_path)
+        elif source_path.is_dir():
+            paths.extend(
+                path.relative_to(PLUGIN_ROOT)
+                for path in source_path.rglob("*")
+                if path.is_file()
+            )
+    unique_paths = {path.as_posix(): path for path in paths}
+    return sorted(unique_paths.values(), key=lambda path: path.as_posix())
 
 
 if __name__ == "__main__":
