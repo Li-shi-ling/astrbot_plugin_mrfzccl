@@ -68,10 +68,9 @@ def is_matching_answer(
 def should_skip_plain_answer_message(
     raw_message: str, *, is_wake_command: bool
 ) -> bool:
+    _ = is_wake_command
     message = re.sub(r"\s+", " ", str(raw_message or "").strip())
     if not message:
-        return True
-    if is_wake_command:
         return True
     if message.startswith(("/", "\\")):
         return True
