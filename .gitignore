@@ -222,3 +222,4 @@ test-output/
 pytest*
 .pytest-tmp-local/
 docs/
+test*

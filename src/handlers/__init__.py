@@ -1,1 +1,1 @@
-"""Command handler modules for Mrfzccl plugin (stage-1 split)."""
+"""Mrfzccl 插件的命令处理模块（第一阶段拆分）。"""

@@ -5,6 +5,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.engine import CursorResult
 
+from astrbot.api import logger
+
 from .tables import UserQnAStats, Match, MatchParticipant, MatchHonor
 from .database import DBManager
 
@@ -480,7 +482,7 @@ class UserQnARepo:
 
                 except Exception as e:
                     # 记录错误但继续处理其他用户
-                    print(f"处理用户 {user_data.get('user_id')} 时出错: {e}")
+                    logger.debug(f"[Mrfzccl] 处理用户 {user_data.get('user_id')} 时出错: {e}")
                     continue
 
             await session.commit()

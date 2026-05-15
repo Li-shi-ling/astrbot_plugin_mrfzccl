@@ -1,9 +1,11 @@
 import asyncio
 import base64
 import html
+from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any
 
 try:
     from html2image import Html2Image
@@ -19,19 +21,11 @@ try:
 except ImportError:
     AIOHTTP_AVAILABLE = False
 
-from .db.tables import MatchHonor, MatchParticipant, UserQnAStats
+from ..db.tables import MatchHonor, MatchParticipant, UserQnAStats
 
 
-class QnAStatsRenderer:
-    """
-    问答统计图片渲染器（HTML -> Image）。
-
-    设计目标：
-    - 白天（浅色）样式默认，更适合群聊阅读
-    - 可选工业（深色）主题
-    - 删除 markdown-it-py 依赖：避免 Markdown 渲染与潜在的 HTML 注入
-    - 对外接口保持兼容：generate_*_image
-    """
+class BaseRenderer(ABC):
+    """问答统计图片渲染器抽象基类。子类只需实现 _theme_css() 即可定义主题样式。"""
 
     CARD_WIDTH = 900
 
@@ -44,23 +38,61 @@ class QnAStatsRenderer:
     USER_PROFILE_HONOR_MAX = 5
     USER_PROFILE_HONOR_ROW_HEIGHT = 44
     USER_PROFILE_HONOR_BASE_HEIGHT = 170
-    RETRO_FRAME_EXTRA_HEIGHT = 52
 
-    def __init__(self, output_dir: str = "data/quiz_images", theme: str = "light"):
+    def __init__(
+        self,
+        output_dir: str = "data/quiz_images",
+        t2i_enabled: bool = False,
+        t2i_max_concurrent: int = 1,
+        html_render_func: Callable[[str, dict, bool, dict | None], Awaitable[Any]]
+        | None = None,
+    ):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        self.theme = (theme or "light").strip().lower()
+        # T2I 配置
+        self.t2i_enabled = bool(t2i_enabled)
+        self._t2i_semaphore = asyncio.Semaphore(max(1, int(t2i_max_concurrent or 1)))
+        self._html_render_func = html_render_func
 
-        if not HTML2IMAGE_AVAILABLE:
+        if not HTML2IMAGE_AVAILABLE and (
+            not self.t2i_enabled or self._html_render_func is None
+        ):
             raise ImportError(
-                "Html2Image包未安装，无法生成图片。请安装：pip install html2image"
+                "Html2Image包未安装，且当前无法使用 AstrBot html_render。请安装：pip install html2image 或启用可用的 T2I 服务"
             )
 
         self._avatar_concurrency = 8
         self._avatar_timeout_seconds = 4
 
-    # ======================= helpers =======================
+    # ======================= 子类必须实现 =======================
+    @abstractmethod
+    def _theme_css(self) -> str:
+        """返回主题 CSS（:root 变量定义）。"""
+        ...
+
+    # ======================= 子类可选覆盖的钩子 =======================
+    def _extra_height(self) -> int:
+        """图片额外高度（像素风主题需要额外边框空间）。"""
+        return 0
+
+    def _body_class(self) -> str:
+        """<body> 的额外 class。"""
+        return ""
+
+    def _top_bar_html(self) -> str:
+        """卡片顶部的额外 HTML（像素风主题的状态栏）。"""
+        return ""
+
+    def _body_wrap_prefix(self) -> str:
+        """卡片内容区域的开始包裹标签。"""
+        return ""
+
+    def _body_wrap_suffix(self) -> str:
+        """卡片内容区域的结束包裹标签。"""
+        return ""
+
+    # ======================= 辅助函数 =======================
     @staticmethod
     def _esc(value: Any) -> str:
         return html.escape(str(value), quote=True)
@@ -107,7 +139,7 @@ class QnAStatsRenderer:
 
     async def _fetch_avatar_data_url(
         self, session: "aiohttp.ClientSession", user_id: str
-    ) -> Optional[str]:
+    ) -> str | None:
         try:
             url = self._avatar_url(user_id)
             async with session.get(url) as resp:
@@ -129,12 +161,12 @@ class QnAStatsRenderer:
         except Exception:
             return None
 
-    async def _download_avatar_map(self, user_ids: List[Any]) -> Dict[str, str]:
+    async def _download_avatar_map(self, user_ids: list[Any]) -> dict[str, str]:
         """
         并行下载头像并返回 data-url 映射。
         - 下载失败：不返回该 key（调用方自行降级为首字头像）
         """
-        unique_ids: List[str] = []
+        unique_ids: list[str] = []
         seen: set[str] = set()
         for raw_id in user_ids:
             uid = str(raw_id or "").strip()
@@ -158,7 +190,7 @@ class QnAStatsRenderer:
             timeout=timeout, connector=connector, headers=headers
         ) as session:
 
-            async def worker(uid: str) -> Optional[tuple[str, str]]:
+            async def worker(uid: str) -> tuple[str, str] | None:
                 async with sem:
                     data_url = await self._fetch_avatar_data_url(session, uid)
                     if not data_url:
@@ -169,7 +201,7 @@ class QnAStatsRenderer:
                 *(worker(uid) for uid in unique_ids), return_exceptions=False
             )
 
-        avatar_map: Dict[str, str] = {}
+        avatar_map: dict[str, str] = {}
         for item in results:
             if not item:
                 continue
@@ -177,80 +209,7 @@ class QnAStatsRenderer:
             avatar_map[uid] = data_url
         return avatar_map
 
-    # ======================= CSS =======================
-    def _theme_css(self) -> str:
-        if self.theme in {"light", "white"}:
-            return """
-            <style>
-            :root{
-              --bg0:#f6f7fb;
-              --bg1:#eef2f7;
-              --panel:rgba(255,255,255,0.92);
-              --panel2:rgba(248,250,252,0.92);
-              --line:rgba(2,6,23,0.12);
-              --text:#0f172a;
-              --muted:#475569;
-              --accent:#b45309;
-              --accent2:#0ea5e9;
-              --good:#16a34a;
-              --bad:#e11d48;
-              --warn:#b45309;
-              --glow1: rgba(14,165,233,0.10);
-              --glow2: rgba(245,158,11,0.08);
-              --grid: rgba(2,6,23,0.045);
-              --stripe: rgba(2,6,23,0.06);
-            }
-            </style>
-            """
-
-        if self.theme in {"retro_win", "retro", "win95", "win"}:
-            return """
-            <style>
-            :root{
-              --bg0:#c5ced1;
-              --bg1:#c5ced1;
-              --panel:#f4f0e6;
-              --panel2:#ffffff;
-              --line:#1a1a1a;
-              --text:#1a1a1a;
-              --muted:#3b3b3b;
-              --accent:#f39800;
-              --accent2:#2c3e50;
-              --good:#1b873f;
-              --bad:#b91c1c;
-              --warn:#f39800;
-              --glow1: rgba(0,0,0,0);
-              --glow2: rgba(0,0,0,0);
-              --grid: rgba(0,0,0,0.10);
-              --stripe: rgba(0,0,0,0.00);
-            }
-            </style>
-            """
-
-        # industrial (default)
-        return """
-        <style>
-        :root{
-          --bg0:#070a0f;
-          --bg1:#0b1220;
-          --panel:rgba(17,24,39,0.92);
-          --panel2:rgba(2,6,23,0.92);
-          --line:rgba(148,163,184,0.18);
-          --text:#e5e7eb;
-          --muted:#94a3b8;
-          --accent:#fbbf24;
-          --accent2:#22d3ee;
-          --good:#34d399;
-          --bad:#fb7185;
-          --warn:#fbbf24;
-          --glow1: rgba(34,211,238,0.14);
-          --glow2: rgba(251,191,36,0.10);
-          --grid: rgba(148,163,184,0.06);
-          --stripe: rgba(251,191,36,0.08);
-        }
-        </style>
-        """
-
+    # ======================= 布局样式 =======================
     def _layout_css(self) -> str:
         return """
         <style>
@@ -879,7 +838,7 @@ class QnAStatsRenderer:
         </style>
         """
 
-    # ======================= size =======================
+    # ======================= 尺寸计算 =======================
     def _calc_table_height(self, row_count: int) -> int:
         return (
             self.BASE_HEIGHT
@@ -888,23 +847,13 @@ class QnAStatsRenderer:
             + self.SAFE_PADDING
         )
 
-    # ======================= render core =======================
+    # ======================= 渲染核心 =======================
     def _build_html(self, body_html: str, title: str) -> str:
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        is_retro = self.theme in {"retro_win", "retro", "win95", "win"}
-        body_class = "theme-retro" if is_retro else ""
-        top_bar = (
-            """
-            <div class="retro-top-header">
-              <span>MRFZCCL // QNA STATS</span>
-              <span>SYSTEM READY_</span>
-            </div>
-            """
-            if is_retro
-            else ""
-        )
-        inner_open = '<div class="retro-inner">' if is_retro else ""
-        inner_close = "</div>" if is_retro else ""
+        body_class = self._body_class()
+        top_bar = self._top_bar_html()
+        inner_open = self._body_wrap_prefix()
+        inner_close = self._body_wrap_suffix()
         return f"""
         <!DOCTYPE html>
         <html lang="zh-CN">
@@ -936,23 +885,342 @@ class QnAStatsRenderer:
     def _html_to_image(
         self, html_str: str, filename: str, width: int, height: int
     ) -> str:
+        try:
+            return self._html_to_image_local(html_str, filename, width, height)
+        except Exception:
+            import traceback as _tb
+
+            from astrbot.api import logger as _logger
+
+            _logger.error(f"[Mrfzccl][渲染] HTML 转图片失败: filename={filename}")
+            _logger.debug(f"[Mrfzccl][渲染] {_tb.format_exc()}")
+            raise
+
+    async def _render_html_to_image(
+        self, html_str: str, filename: str, width: int, height: int
+    ) -> str:
+        from astrbot.api import logger as _logger
+
+        if self.t2i_enabled and self._html_render_func is not None:
+            try:
+                _logger.debug(
+                    "[Mrfzccl][渲染] 图片生成尝试 T2I: filename=%s size=%sx%s",
+                    filename,
+                    width,
+                    height,
+                )
+                return await self._html_to_image_t2i(html_str, filename, width, height)
+            except Exception:
+                if not HTML2IMAGE_AVAILABLE:
+                    raise
+
+                _logger.warning(
+                    "[Mrfzccl][渲染] T2I 渲染失败，回退到本地 Html2Image: filename=%s",
+                    filename,
+                    exc_info=True,
+                )
+        else:
+            _logger.debug(
+                "[Mrfzccl][渲染] 图片生成使用本地 Html2Image: filename=%s reason=%s",
+                filename,
+                "t2i_disabled" if not self.t2i_enabled else "html_render_missing",
+            )
+
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, lambda: self._html_to_image_local(html_str, filename, width, height)
+        )
+
+    def _html_to_image_t2i_document(
+        self, html_str: str, width: int, height: int
+    ) -> str:
+        fixed_size_css = f"""
+        <style id="mrfzccl-t2i-fixed-size">
+        html, body {{
+            width: {int(width)}px !important;
+            min-width: {int(width)}px !important;
+            max-width: {int(width)}px !important;
+            height: auto !important;
+            min-height: 0 !important;
+            max-height: none !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            overflow: visible !important;
+        }}
+        .content-container {{
+            width: {int(width)}px !important;
+            min-width: {int(width)}px !important;
+            max-width: {int(width)}px !important;
+            height: auto !important;
+            min-height: 0 !important;
+            max-height: none !important;
+            overflow: visible !important;
+        }}
+        .page {{
+            width: 100% !important;
+            height: auto !important;
+            min-height: 0 !important;
+            max-height: none !important;
+            overflow: visible !important;
+        }}
+        .card {{
+            width: 100% !important;
+            height: auto !important;
+            min-height: 0 !important;
+            max-height: none !important;
+        }}
+        </style>
+        """
+        if "</head>" in html_str:
+            return html_str.replace("</head>", f"{fixed_size_css}</head>", 1)
+        return fixed_size_css + html_str
+
+    def _html_to_image_local(
+        self, html_str: str, filename: str, width: int, height: int
+    ) -> str:
         hti = Html2Image(output_path=str(self.output_dir))
         out = f"{filename}.png"
         hti.screenshot(html_str=html_str, save_as=out, size=(width, height))
-        return str(self.output_dir / out)
+        out_path = self.output_dir / out
+
+        from astrbot.api import logger as _logger
+
+        _logger.debug(
+            "[Mrfzccl][渲染] 本地 Html2Image 完成: filename=%s path=%s", filename, out_path
+        )
+        return str(out_path)
+
+    async def _html_to_image_t2i(
+        self, html_str: str, filename: str, width: int, height: int
+    ) -> str:
+        """Render HTML through AstrBot's native html_render T2I chain."""
+        if self._html_render_func is None:
+            raise RuntimeError("T2I rendering requires AstrBot html_render")
+
+        from astrbot.api import logger as _logger
+
+        t2i_html = self._html_to_image_t2i_document(html_str, width, height)
+        last_error: Exception | None = None
+        async with self._t2i_semaphore:
+            for index, image_options in enumerate(self._t2i_render_strategies(), 1):
+                options = dict(image_options)
+                if options.get("type") == "png":
+                    options["quality"] = None
+                try:
+                    result = await self._html_render_func(t2i_html, {}, False, options)
+                    path = self._write_t2i_result(result, filename)
+                    _logger.debug(
+                        "[Mrfzccl][渲染] T2I 渲染完成: filename=%s strategy=%s type=%s result=%s path=%s",
+                        filename,
+                        index,
+                        options.get("type"),
+                        type(result).__name__,
+                        path,
+                    )
+                    return path
+                except Exception as exc:
+                    last_error = exc
+                    _logger.warning(
+                        "[Mrfzccl][渲染] T2I 策略失败: filename=%s strategy=%s options=%s",
+                        filename,
+                        index,
+                        options,
+                        exc_info=True,
+                    )
+
+        raise RuntimeError(
+            f"All T2I render strategies failed: {last_error}"
+        ) from last_error
+
+    @staticmethod
+    def _t2i_render_strategies() -> list[dict[str, Any]]:
+        return [
+            {
+                "full_page": True,
+                "type": "png",
+                "scale": "device",
+                "device_scale_factor_level": "ultra",
+            },
+            {
+                "full_page": True,
+                "type": "jpeg",
+                "quality": 100,
+                "scale": "device",
+                "device_scale_factor_level": "ultra",
+            },
+            {
+                "full_page": True,
+                "type": "jpeg",
+                "quality": 95,
+                "scale": "device",
+                "device_scale_factor_level": "high",
+            },
+            {
+                "full_page": True,
+                "type": "jpeg",
+                "quality": 80,
+                "scale": "device",
+            },
+        ]
+
+    def _write_t2i_result(self, result: Any, filename: str) -> str:
+        if isinstance(result, (bytes, bytearray)):
+            data = bytes(result)
+            if not self._is_image_bytes(data):
+                raise RuntimeError(f"T2I 返回了非图片数据（头部: {data[:10].hex()}）")
+            out_path = self.output_dir / f"{filename}.png"
+            with open(out_path, "wb") as f:
+                f.write(data)
+            return self._trim_t2i_screenshot_border(out_path, filename)
+
+        if isinstance(result, str):
+            path = Path(result)
+            if path.exists():
+                return self._trim_t2i_screenshot_border(path, filename)
+            raise RuntimeError(f"T2I 返回了不可用的字符串结果: {result[:120]}")
+
+        raise RuntimeError(f"T2I 返回了不支持的数据类型: {type(result).__name__}")
+
+    @staticmethod
+    def _is_image_bytes(data: bytes) -> bool:
+        return data.startswith(b"\x89PNG") or data.startswith(b"\xff\xd8")
+
+    def _trim_t2i_screenshot_border(self, image_path: Path, filename: str) -> str:
+        """Crop remote T2I viewport borders while keeping local Html2Image untouched."""
+        from PIL import Image, UnidentifiedImageError
+
+        from astrbot.api import logger as _logger
+
+        try:
+            with Image.open(image_path) as image:
+                source = image.convert("RGBA")
+                bbox = self._t2i_content_bbox(source)
+                if bbox is None:
+                    _logger.debug(
+                        "[Mrfzccl][渲染] T2I 结果无需裁剪: filename=%s path=%s size=%sx%s reason=no_border",
+                        filename,
+                        image_path,
+                        source.width,
+                        source.height,
+                    )
+                    return str(image_path)
+
+                full_bbox = (0, 0, source.width, source.height)
+                if bbox == full_bbox:
+                    _logger.debug(
+                        "[Mrfzccl][渲染] T2I 结果无需裁剪: filename=%s path=%s size=%sx%s reason=full_content",
+                        filename,
+                        image_path,
+                        source.width,
+                        source.height,
+                    )
+                    return str(image_path)
+
+                cropped = self._trim_t2i_trailing_light_edges(source.crop(bbox))
+                out_path = self.output_dir / f"{filename}.png"
+                cropped.save(out_path)
+                _logger.debug(
+                    "[Mrfzccl][渲染] T2I 结果裁剪白边: filename=%s source=%s original=%sx%s cropped=%sx%s path=%s",
+                    filename,
+                    image_path,
+                    source.width,
+                    source.height,
+                    cropped.width,
+                    cropped.height,
+                    out_path,
+                )
+                return str(out_path)
+        except (OSError, UnidentifiedImageError):
+            _logger.warning(
+                "[Mrfzccl][渲染] T2I 结果白边裁剪跳过: filename=%s path=%s reason=image_open_failed",
+                filename,
+                image_path,
+                exc_info=True,
+            )
+            return str(image_path)
+
+    @staticmethod
+    def _t2i_content_bbox(image: Any) -> tuple[int, int, int, int] | None:
+        from PIL import Image, ImageChops
+
+        corners = [
+            image.getpixel((0, 0)),
+            image.getpixel((image.width - 1, 0)),
+            image.getpixel((0, image.height - 1)),
+            image.getpixel((image.width - 1, image.height - 1)),
+        ]
+
+        def close(
+            left: tuple[int, ...], right: tuple[int, ...], tolerance: int
+        ) -> bool:
+            return all(
+                abs(int(left_value) - int(right_value)) <= tolerance
+                for left_value, right_value in zip(left, right)
+            )
+
+        background = None
+        for candidate in corners:
+            matches = sum(close(candidate, corner, 8) for corner in corners)
+            if matches >= 2:
+                background = candidate
+                break
+        if background is None:
+            return None
+
+        background_image = Image.new("RGBA", image.size, background)
+        diff = ImageChops.difference(image, background_image).convert("L")
+        mask = diff.point(lambda value: 255 if value > 12 else 0)
+        return mask.getbbox()
+
+    @staticmethod
+    def _trim_t2i_trailing_light_edges(image: Any) -> Any:
+        width, height = image.size
+        rgb = image.convert("RGB")
+
+        def has_dark_pixel_in_column(x: int) -> bool:
+            step = max(1, height // 100)
+            return any(min(rgb.getpixel((x, y))) < 210 for y in range(0, height, step))
+
+        def has_dark_pixel_in_row(y: int) -> bool:
+            step = max(1, width // 100)
+            return any(min(rgb.getpixel((x, y))) < 210 for x in range(0, width, step))
+
+        right = width
+        for x in range(width - 1, -1, -1):
+            if has_dark_pixel_in_column(x):
+                right = x + 1
+                break
+
+        bottom = height
+        for y in range(height - 1, -1, -1):
+            if has_dark_pixel_in_row(y):
+                bottom = y + 1
+                break
+
+        if right <= 0 or bottom <= 0 or (right == width and bottom == height):
+            return image
+        return image.crop((0, 0, right, bottom))
 
     def render_to_image(
         self, body_html: str, filename: str, title: str, height: int
     ) -> str:
-        if self.theme in {"retro_win", "retro", "win95", "win"}:
-            height = int(height) + self.RETRO_FRAME_EXTRA_HEIGHT
+        height = int(height) + self._extra_height()
         html_str = self._build_html(body_html, title)
         return self._html_to_image(html_str, filename, self.CARD_WIDTH, height)
 
-    # ======================= body builders (HTML) =======================
+    async def render_to_image_async(
+        self, body_html: str, filename: str, title: str, height: int
+    ) -> str:
+        height = int(height) + self._extra_height()
+        html_str = self._build_html(body_html, title)
+        return await self._render_html_to_image(
+            html_str, filename, self.CARD_WIDTH, height
+        )
+
+    # ======================= 内容构建（HTML）=======================
     def _build_leaderboard_body(
         self,
-        users: List[UserQnAStats],
+        users: list[UserQnAStats],
         title: str,
         sort_key: str,
         mode: str,
@@ -993,7 +1261,7 @@ class QnAStatsRenderer:
 
         th_html = "".join(f"<th>{self._esc(h)}</th>" for h in headers)
 
-        row_html_parts: List[str] = []
+        row_html_parts: list[str] = []
         for idx, u in enumerate(sorted_users, 1):
             correct = self._safe_int(getattr(u, "correct_count", 0))
             wrong = self._safe_int(getattr(u, "wrong_count", 0))
@@ -1065,7 +1333,7 @@ class QnAStatsRenderer:
 
     def _build_match_leaderboard_body(
         self,
-        participants: List[MatchParticipant],
+        participants: list[MatchParticipant],
         title: str,
         avatar_map: Mapping[str, str],
     ) -> str:
@@ -1099,7 +1367,7 @@ class QnAStatsRenderer:
 
         th_html = "".join(f"<th>{self._esc(h)}</th>" for h in headers)
 
-        row_html_parts: List[str] = []
+        row_html_parts: list[str] = []
         for idx, p in enumerate(sorted_participants, 1):
             correct = self._safe_int(getattr(p, "correct_count", 0))
             wrong = self._safe_int(getattr(p, "wrong_count", 0))
@@ -1175,9 +1443,9 @@ class QnAStatsRenderer:
     def _build_user_profile_body(self, u: UserQnAStats, rank: Mapping[str, Any]) -> str:
         return self._build_user_profile_body_with_avatar(u, rank, avatar_data_url=None)
 
-    # ======================= Public APIs =======================
+    # ======================= 公开接口 =======================
     async def generate_correct_leaderboard_image(
-        self, users: List[UserQnAStats]
+        self, users: list[UserQnAStats]
     ) -> str:
         avatar_map = await self._download_avatar_map(
             [getattr(u, "user_id", "") for u in users]
@@ -1191,13 +1459,9 @@ class QnAStatsRenderer:
         )
         height = self._calc_table_height(len(users))
         name = f"correct_leaderboard_{datetime.now():%Y%m%d_%H%M%S}"
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None,
-            lambda: self.render_to_image(body, name, "正确次数排行榜", height),
-        )
+        return await self.render_to_image_async(body, name, "正确次数排行榜", height)
 
-    async def generate_wrong_leaderboard_image(self, users: List[UserQnAStats]) -> str:
+    async def generate_wrong_leaderboard_image(self, users: list[UserQnAStats]) -> str:
         avatar_map = await self._download_avatar_map(
             [getattr(u, "user_id", "") for u in users]
         )
@@ -1210,13 +1474,9 @@ class QnAStatsRenderer:
         )
         height = self._calc_table_height(len(users))
         name = f"wrong_leaderboard_{datetime.now():%Y%m%d_%H%M%S}"
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None,
-            lambda: self.render_to_image(body, name, "错误次数排行榜", height),
-        )
+        return await self.render_to_image_async(body, name, "错误次数排行榜", height)
 
-    async def generate_hints_leaderboard_image(self, users: List[UserQnAStats]) -> str:
+    async def generate_hints_leaderboard_image(self, users: list[UserQnAStats]) -> str:
         avatar_map = await self._download_avatar_map(
             [getattr(u, "user_id", "") for u in users]
         )
@@ -1229,17 +1489,13 @@ class QnAStatsRenderer:
         )
         height = self._calc_table_height(len(users))
         name = f"hints_leaderboard_{datetime.now():%Y%m%d_%H%M%S}"
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None,
-            lambda: self.render_to_image(body, name, "提示次数排行榜", height),
-        )
+        return await self.render_to_image_async(body, name, "提示次数排行榜", height)
 
     async def generate_match_leaderboard_image(
         self,
         match_name: str,
-        participants: List[MatchParticipant],
-        title: Optional[str] = None,
+        participants: list[MatchParticipant],
+        title: str | None = None,
     ) -> str:
         participants = list(participants or [])
         title_text = title or f"比赛「{match_name}」排行榜"
@@ -1249,17 +1505,13 @@ class QnAStatsRenderer:
         body = self._build_match_leaderboard_body(participants, title_text, avatar_map)
         height = self._calc_table_height(len(participants))
         name = f"match_leaderboard_{datetime.now():%Y%m%d_%H%M%S}"
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None,
-            lambda: self.render_to_image(body, name, title_text, height),
-        )
+        return await self.render_to_image_async(body, name, title_text, height)
 
     async def generate_user_profile_image(
         self,
         user_stats: UserQnAStats,
         rank_info: Mapping[str, Any],
-        honors: Optional[List[MatchHonor]] = None,
+        honors: list[MatchHonor] | None = None,
     ) -> str:
         avatar_map = await self._download_avatar_map(
             [getattr(user_stats, "user_id", "")]
@@ -1278,17 +1530,13 @@ class QnAStatsRenderer:
                 self.USER_PROFILE_HONOR_BASE_HEIGHT
                 + len(honor_list) * self.USER_PROFILE_HONOR_ROW_HEIGHT
             )
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None,
-            lambda: self.render_to_image(body, name, "用户信息", height),
-        )
+        return await self.render_to_image_async(body, name, "用户信息", height)
 
-    def _build_user_honor_section(self, honors: List[MatchHonor]) -> str:
+    def _build_user_honor_section(self, honors: list[MatchHonor]) -> str:
         if not honors:
             return ""
 
-        row_html_parts: List[str] = []
+        row_html_parts: list[str] = []
         for h in honors[: self.USER_PROFILE_HONOR_MAX]:
             medal = getattr(h, "medal", "")
             match_name = getattr(h, "match_name", "-")
@@ -1338,8 +1586,8 @@ class QnAStatsRenderer:
         self,
         u: UserQnAStats,
         rank: Mapping[str, Any],
-        avatar_data_url: Optional[str],
-        honors: Optional[List[MatchHonor]] = None,
+        avatar_data_url: str | None,
+        honors: list[MatchHonor] | None = None,
     ) -> str:
         user_name_raw = getattr(u, "user_name", "-")
         user_id_raw = getattr(u, "user_id", "-")

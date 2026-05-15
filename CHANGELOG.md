@@ -1,5 +1,114 @@
 ## 更新日志
 
+### 2.0.0
+- ✅ 正式发布 2.0.0，整合 beta 阶段的 T2I 渲染链路、问答统计主题、LLM 兜底判题、非 `/fcc` 答案检测、低权重抽题概率和长期运行稳定性修复。
+- ✅ 网络 T2I 默认通过 AstrBot 原生 `html_render` 调用，服务地址由 AstrBot 系统配置维护，本地 `Html2Image` 仍作为回退路径。
+- ✅ 问答统计图片支持 `light`、`industrial`、`retro_win`、`snowcap_shop`、`constructivist_people` 等主题，并修复远程 T2I 截图白边和高度问题。
+- ✅ 完善插件配置提示、README、CHANGELOG 和打包流程，生成正式包 `astrbot_plugin_mrfzccl-v2.0.0.zip`。
+
+### 2.0.0-beta.6
+- ✅ 根据第二轮代码审查修复图片下载重试参数的并发状态污染，并让 `timeout` 参数实际透传到下载请求。
+- ✅ 为每日答题计数增加旧日期懒清理，避免长期运行时 `daily_counter` 无界增长。
+- ✅ 增强插件卸载清理：取消比赛任务后清理房间锁、玩家状态、原图引用、HTTP session 和数据库引擎。
+- ✅ 降级保护 AstrBot 系统配置读取，移除未使用的 LLM prompt 包装方法和重复的最近干员状态。
+- ✅ 为比赛循环任务增加异常日志，避免后台任务失败只在事件循环告警中暴露。
+
+### 2.0.0-beta.5
+- ✅ 根据专项方案修复低权重干员概率计算，使 `low_weight_ratio` 表示单个低权重干员相对普通干员的抽中概率倍率
+- ✅ 安全获取 AstrBot `html_render`，避免运行环境未注入该属性时影响插件初始化
+- ✅ 数据库旧结构迁移改为先检查字段再补列，不再吞掉所有 `OperationalError`
+- ✅ 降低 `/fcw` 详细状态日志级别，并移除不必要的运行时模块注入
+
+### 2.0.0-beta.4
+- ✅ 新增 `constructivist_people` 问答统计图片主题，参考 `constructivist_people_we_theme` 的构成主义/People We 视觉原型
+- ✅ 主题素材迁移到 `assets/constructivist_people` 并做保守压缩，打包继续排除 `cs` 开发素材目录
+
+### 2.0.0-beta.3
+- ✅ 新增 `snowcap_shop` 问答统计图片主题，参考雪雉小店原型的配色、网格、票据边框和装饰素材
+- ✅ 主题素材放入 `assets/snowcap_shop` 并压缩大图，打包时不再包含开发用素材目录
+
+### 2.0.0-beta.2
+- ✅ `/fcc` 和非 `/fcc` 普通答案检测均支持英文大小写不敏感匹配
+- ✅ 英文干员名、英文别名和普通消息中的英文答案包含检测都会忽略大小写
+
+### 2.0.0-beta.1
+- ✅ 扩展普通消息答案检测：通过 @ 或唤醒词触发的消息也会参与非 `/fcc` 精确答案检测
+- ✅ 未命中正确答案时不回复、不拿房间锁，避免影响后续消息处理链路
+
+### 2.0.0-beta
+- ✅ 发布 2.0.0 beta 版本
+- ✅ 补齐配置文件中嵌套配置项的提示文本，方便在 AstrBot 配置界面理解每个开关和参数
+
+### 1.2.49
+- ✅ 调整 LLM 兜底判题输出解析：大小写无关地包含检测 `true`/`false`，无效输出仍按配置重试，最终失败默认判为 `false`
+
+### 1.2.48
+- ✅ 继续修正 light/industrial 主题 T2I 截图右侧和底部近白残边，并将问答统计图片主题配置改为下拉选项
+
+### 1.2.47
+- ✅ 优化 T2I 专用 HTML 尺寸方案：固定宽度但让高度按内容自然收缩，避免远程全页截图保留多余背景
+
+### 1.2.46
+- ✅ 修复远程 T2I 全屏截图返回路径时右侧/下方出现大块白边的问题，落地结果会按截图外框背景裁剪并记录裁剪前后尺寸
+
+### 1.2.45
+- ✅ 为排行榜/名片图片生成增加少量路径日志，记录 T2I、本地回退、策略成功和最终输出位置
+
+### 1.2.44
+- ✅ 将 T2I 开关保留在 `t2i.enabled`，`t2i` 分组继续承载开关和并发参数
+- ✅ 保持插件侧 `t2i.endpoint` 删除状态，服务地址仍由 AstrBot 系统配置管理
+
+### 1.2.43
+- ✅ 移除插件侧 `t2i.endpoint` 配置项，T2I 服务地址完全交给 AstrBot 系统配置 `t2i_endpoint`
+- ✅ 将 T2I 开关提升为顶层 `t2i_enabled`，`t2i` 分组仅保留并发等渲染参数
+
+### 1.2.42
+- ✅ 严格对齐群日报插件调用链路：通过注入的 AstrBot `html_render` 调用 T2I，不再自建 T2I HTTP 请求
+- ✅ 复用参考插件的多策略渲染参数（PNG ultra -> JPEG ultra/high/normal），并保持 `return_url=False` 获取图片数据
+- ✅ 远程失败时仅回退本地 `Html2Image`，保留固定尺寸 HTML 以避免全屏截图影响高度
+
+### 1.2.40
+- ✅ 修复远程 T2I 连续渲染时复用已关闭事件循环上的 `aiohttp.ClientSession` 导致 `Event loop is closed` 的问题
+
+### 1.2.39
+- ✅ T2I 网络渲染默认开启，插件端点留空时自动读取 AstrBot 系统配置 `t2i_endpoint`
+- ✅ 修复远程 T2I 默认全屏截图导致排行榜/名片高度计算失效的问题，T2I 分支改为固定 viewport/clip 渲染
+- ✅ 保持本地 `Html2Image` 渲染逻辑不变，并兼容根地址、`/text2img`、`/text2img/generate` 三种 T2I 端点写法
+
+### 1.2.38
+- ✅ 修复重构后 `_layout_css()` 丢失导致图片渲染崩溃的严重 bug
+- ✅ 修复渲染异常时静默吞错：添加完整异常栈日志输出
+
+### 1.2.37
+- ✅ 重构渲染模块：抽象基类 `BaseRenderer` + 三个独立子类 `LightRenderer`/`IndustrialRenderer`/`RetroWinRenderer`
+- ✅ 主题 CSS 由子类各自实现，复古主题通过钩子方法覆盖 HTML 结构，消除类内 `if/elif` 分支
+
+### 1.2.36
+- ✅ 修复 T2I API 调用格式：端点为 `/text2img/generate`，请求体使用标准 AstrBot `{tmpl, json, tmpldata, options}` 格式
+
+### 1.2.35
+- ✅ 新增网络 T2I（HTML 转图片）服务支持，可配置远程 T2I 端点渲染排行榜/名片图片
+- ✅ T2I 渲染失败时自动回退到本地 Html2Image 渲染
+- ✅ 新增 T2I 并发控制（`max_concurrent`），保护服务端资源
+
+### 1.2.34
+- ✅ 修复重构后大量注释/docstring/日志的 UTF-8 乱码，恢复为正常中文
+- ✅ 统一 `src/` 下所有模块注释语言为中文，清理残留英文 docstring 和分隔注释
+
+### 1.2.33
+- ✅ 重构插件入口：聚焦于 AstrBot 注册、生命周期与依赖组装
+- ✅ 将配置、运行时、判题、选题、图片、比赛、统计逻辑拆分为独立模块（`core/`、`gameplay/`、`images/`、`competition/`、`stats/`）
+- ✅ 保留现有指令、比赛模式、LLM 判题、图片下载重试等行为的兼容适配层
+
+### 1.2.32
+- ✅ 移除旧版 `QnAStatsRenderer*` 兼容入口，统一从 `src/rendering` 使用渲染模块
+
+### 1.2.31
+- ✅ 将 QnAStatsRenderer 相关实现划分到 `src/rendering` 模块
+
+### 1.2.30
+- ✅ 将 `main.py` 中不依赖插件实例状态的工具方法迁移到 `src/tool.py`，保持入口类聚焦于插件编排
+
 ### 1.2.29
 - ✅ 排除唤醒/命令消息的任意消息精确判题，避免 `/help`、`/ccl` 等命令文本包含答案时被误判为答对
 

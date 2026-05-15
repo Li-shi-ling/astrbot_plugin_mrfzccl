@@ -2,30 +2,50 @@ from astrbot.api.event import MessageChain, filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
 import astrbot.api.message_components as Comp
 from astrbot.api import AstrBotConfig, logger
-from astrbot.api.provider import Provider
 from astrbot.api.star import StarTools
 from astrbot.core.utils.astrbot_path import get_astrbot_temp_path
 from astrbot.api.event.filter import EventMessageType
 
-from .src.QnAStatsRenderer import QnAStatsRenderer
+from .src.core.config import LLM_JUDGE_MAX_RETRIES_HARD_LIMIT, load_settings
+from .src.gameplay.service import GuessGameService
+from .src.gameplay.judging import (
+    LlmJudgeService,
+    MatchSettings as JudgeMatchSettings,
+    should_skip_plain_answer_message,
+)
+from .src.competition.service import MatchService
+from .src.images.service import ImageDownloader
+from .src.gameplay.questions import QuestionPicker
+from .src.rendering import (
+    QnAStatsRenderer,
+    QnAStatsRendererConstructivist,
+    QnAStatsRendererIndustrial,
+    QnAStatsRendererRetroWin,
+    QnAStatsRendererSnowcapShop,
+)
+from .src.core.runtime import GameRuntime, MatchRuntime
 from .src.tool import (
     generate_match_leaderboard_text,
     has_active_game,
     load_operator_aliases,
+    load_image_from_bytes,
+    mask_image_with_random_blocks,
     merge_alias_maps,
+    parse_llm_judge_result,
     parse_aliases,
     parse_aliases_json_text,
+    pil_image_to_bytes,
     normalize_compact_fc_command,
+    resize_to_target,
 )
 from .src.db.repo import UserQnARepo, MatchRepo
 from .src.db.database import DBManager
 from .src.handlers import ccl_admin, ccl_leaderboard, ccl_match, fc_handlers
 
-from typing import Optional, Dict, Any, Tuple, List
+from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta
 from urllib.parse import urlparse
 from pathlib import Path
-from io import BytesIO
 from PIL import Image
 import numpy as np
 import traceback
@@ -38,11 +58,9 @@ import time
 import os
 import re
 
-LLM_JUDGE_MAX_RETRIES_HARD_LIMIT = 5
-
 
 # 注册插件，指定插件名、作者、描述和版本号
-@register("mrfzccl", "Lishining", "你知道的,我一直是明日方舟高手", "1.0.0")
+@register("mrfzccl", "Lishining", "你知道的,我一直是明日方舟高手", "2.0.0")
 class Mrfzccl(Star):
     _question_candidate_names: np.ndarray
     _question_candidate_urls: List[List[str]]
@@ -51,16 +69,24 @@ class Mrfzccl(Star):
     _question_cache_data_id: Optional[int]
     _question_cache_kw_sig: Optional[tuple]
     _question_rng: np.random.Generator
-    recent_characters: List[str]
 
     # 插件初始化方法
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context, config)  # 调用父类初始化
+        self.plugin_dir = Path(__file__).resolve().parent
+        self.context = context
+        get_context_config = getattr(self, "_get_context_config", None)
+        system_config = get_context_config() if callable(get_context_config) else None
+        self.settings = load_settings(config, self.plugin_dir, system_config)
+        self.game_runtime = GameRuntime()
+        self.match_runtime = MatchRuntime(self.game_runtime)
         self.Config = config  # 保存配置对象
         self.player: Dict[str, Dict[str, Any]] = {}  # 存储玩家游戏状态
         self.original_images: Dict[str, Image.Image] = {}  # 保存原始图片对象
         self.is_load = False  # 数据加载标志
         self._shutting_down = False  # 添加关闭标志，用于优雅关闭
+        self.game_runtime.player = self.player
+        self.game_runtime.original_images = self.original_images
 
         # 是否对排行榜类进行管理员限制
         self.require_admin = self.Config.get("require_admin", True)
@@ -101,19 +127,13 @@ class Mrfzccl(Star):
         self.llm_judge_provider_id = str(
             llm_judge.get("provider_id", llm_judge.get("model", "")) or ""
         ).strip()
-        self.llm_judge_prompt = str(
-            llm_judge.get(
-                "prompt",
-                "你是明日方舟猜题判题器。已知标准答案：{answer}。用户回答：{guess}。请只判断用户回答是否可以视为该标准答案。只能输出 True 或 False，不要输出其他任何内容。",
-            )
-            or ""
-        )
+        self.llm_judge_prompt = self.settings.llm_judge.prompt
         self.llm_judge_debug = bool(llm_judge.get("debug", False))
         self.llm_judge_enable_retry = bool(llm_judge.get("enable_retry", False))
         configured_llm_judge_max_retries = int(llm_judge.get("max_retries", 0) or 0)
         if configured_llm_judge_max_retries > LLM_JUDGE_MAX_RETRIES_HARD_LIMIT:
             logger.warning(
-                "[llm_judge] max_retries=%s exceeds hard limit %s, clamping",
+                "[Mrfzccl][llm_judge] max_retries=%s exceeds hard limit %s, clamping",
                 configured_llm_judge_max_retries,
                 LLM_JUDGE_MAX_RETRIES_HARD_LIMIT,
             )
@@ -167,9 +187,15 @@ class Mrfzccl(Star):
         self._room_lock_last_used: dict[
             str, float
         ] = {}  # room_id -> 最近一次使用时间戳（用于清理长期闲置锁）
+        self.match_answer_grace_period = self.settings.match.answer_grace_period
+        self.match_runtime.question_state = self.match_question_state
+        self.match_runtime.next_task = self.match_next_task
+        self.match_runtime.loop_task = self.match_loop_task
+        self.match_runtime.sessions = self.match_sessions
+        self.match_runtime.locks = self.match_locks
+        self.match_runtime.lock_last_used = self._room_lock_last_used
 
         # 防重复配置
-        self.recent_characters: list = []  # 最近出现的干员列表
         self.max_recent_count = 20  # 最大记录数量
 
         # 别名系统
@@ -232,49 +258,103 @@ class Mrfzccl(Star):
 
         # 初始化问答统计渲染器
         renderer_theme = self.Config.get("renderer_theme", "light")
-        self.renderer = QnAStatsRenderer(
-            output_dir=str(self.img_tmp_path), theme=renderer_theme
+        if renderer_theme in {"snowcap_shop", "xuezhi_shop", "snowcap", "shop"}:
+            renderer_cls = QnAStatsRendererSnowcapShop
+        elif renderer_theme in {
+            "constructivist_people",
+            "constructivist",
+            "people_we",
+            "peoplewe",
+        }:
+            renderer_cls = QnAStatsRendererConstructivist
+        elif renderer_theme in {"retro_win", "retro", "win95", "win"}:
+            renderer_cls = QnAStatsRendererRetroWin
+        elif renderer_theme in {"industrial", "dark"}:
+            renderer_cls = QnAStatsRendererIndustrial
+        else:
+            renderer_cls = QnAStatsRenderer
+        t2i_config = self.settings.t2i
+        self.renderer = renderer_cls(
+            output_dir=str(self.img_tmp_path),
+            t2i_enabled=t2i_config.enabled,
+            t2i_max_concurrent=t2i_config.max_concurrent,
+            html_render_func=getattr(self, "html_render", None),
         )
         logger.info(f"[Mrfzccl] 渲染主题: {renderer_theme}")
 
         # 构建数据文件路径
-        data_path = self.Config.get("mrfz_data_path", "arknights_skins_dict.json")
-        # 如果是相对路径，将其转换为绝对路径
-        if not os.path.isabs(data_path):
-            # 获取插件所在目录
-            data_path = "arknights_skins_dict.json"
-            plugin_dir = os.path.dirname(os.path.abspath(__file__))
-            data_path = os.path.join(plugin_dir, data_path)
-        if not data_path:
-            logger.error("[Mrfzccl] 未配置数据文件路径")
-            return
+        data_path = self.settings.data_path
         try:
             logger.info(f"[Mrfzccl] 数据文件路径: {data_path}")
-            if not os.path.exists(data_path):
+            if not data_path.exists():
                 logger.error(f"[Mrfzccl] 数据文件不存在: {data_path}")
                 return
-            logger.info("[Mrfzccl] 数据文件存在，开始读取")
-            # 读取并解析JSON数据文件
-            with open(data_path, "r", encoding="utf-8") as f:
-                self.data = json.load(f)
-            logger.info("[Mrfzccl] JSON解析成功")
+            with data_path.open("r", encoding="utf-8") as file:
+                self.data = json.load(file)
             if not isinstance(self.data, dict):
                 logger.error("[Mrfzccl] 数据文件格式错误: 应为字典类型")
                 return
-            self.is_load = True  # 设置数据加载成功标志
-            logger.info(f"[Mrfzccl] 数据加载成功，共加载 {len(self.data)} 个角色")
-        except json.JSONDecodeError as e:
-            logger.error(f"[Mrfzccl] JSON解析错误: {e}")
-            logger.error(traceback.format_exc())
-        except FileNotFoundError as e:
-            logger.error(f"[Mrfzccl] 文件未找到: {e}")
-            logger.error(traceback.format_exc())
-        except PermissionError as e:
-            logger.error(f"[Mrfzccl] 权限错误: {e}")
-            logger.error(traceback.format_exc())
-        except Exception as e:
-            logger.error(f"[Mrfzccl] 加载数据文件时发生未知错误: {e}")
-            logger.error(traceback.format_exc())
+            self.is_load = True
+            logger.debug(f"[Mrfzccl] 数据加载成功，共加载 {len(self.data)} 个角色")
+        except json.JSONDecodeError as exc:
+            logger.error(f"[Mrfzccl] JSON解析错误: {exc}")
+            logger.debug(f"[Mrfzccl] {traceback.format_exc()}")
+        except (FileNotFoundError, PermissionError, OSError) as exc:
+            logger.error(f"[Mrfzccl] 文件未找到或权限错误: {exc}")
+            logger.debug(f"[Mrfzccl] {traceback.format_exc()}")
+        except Exception as exc:
+            logger.error(f"[Mrfzccl] 加载数据文件时发生未知错误: {exc}")
+            logger.debug(f"[Mrfzccl] {traceback.format_exc()}")
+        self.question_picker = QuestionPicker(
+            self.data if getattr(self, "is_load", False) else {},
+            low_weight_keywords=self.low_weight_keywords,
+            low_weight_ratio=self.low_weight_ratio,
+            max_recent_count=self.max_recent_count,
+        )
+        self.image_downloader = ImageDownloader(
+            lambda: self._get_session(),
+            max_retries=self.image_download_max_retries,
+            retry_interval_seconds=self.image_download_retry_interval_seconds,
+        )
+        self.game_service = GuessGameService(
+            game_runtime=self.game_runtime,
+            question_picker=self.question_picker,
+            image_downloader=self.image_downloader,
+            target_size=self.target_size,
+            easy_probability=self.easy_probability,
+            medium_probability=self.medium_probability,
+            hard_probability=self.hard_probability,
+        )
+        self.llm_judge_service = LlmJudgeService(
+            self.context,
+            enabled=self.llm_judge_enabled,
+            provider_id=self.llm_judge_provider_id,
+            prompt=self.llm_judge_prompt,
+            debug=self.llm_judge_debug,
+            enable_retry=self.llm_judge_enable_retry,
+            max_retries=self.llm_judge_max_retries,
+            retry_interval_seconds=self.llm_judge_retry_interval_seconds,
+        )
+        self.judge_settings = JudgeMatchSettings(
+            similarity_threshold=self.similarity_threshold,
+            calculate_threshold=self.calculate_threshold,
+            enable_similarity_match=self.enable_similarity_match,
+            enable_character_coverage_match=self.enable_character_coverage_match,
+            enable_homophone=self.enable_homophone,
+            enable_operator_alias_match=self.enable_operator_alias_match,
+            match_answer_grace_period=getattr(self, "match_answer_grace_period", 3.0),
+        )
+        self.match_service = MatchService(
+            context=self.context,
+            match_repo=self.match_repo,
+            renderer=self.renderer,
+            game_runtime=self.game_runtime,
+            match_runtime=self.match_runtime,
+            start_game=self.fc_init,
+            next_hint=self._next_hint_text_and_advance,
+            shutting_down=lambda: self._shutting_down,
+            hint_delay=self.match_hint_delay,
+        )
 
     # ========== 游戏相关指令 ==========
     # 初始化游戏命令
@@ -444,16 +524,9 @@ class Mrfzccl(Star):
 
         raw_message = str(event.message_str or "")
         message = re.sub(r"\s+", " ", raw_message.strip())
-        if not message:
-            return
-
-        if getattr(event, "is_at_or_wake_command", False):
-            return
-
-        if message.startswith(("/", "\\")):
-            return
-
-        if message.startswith(("fc ", "fcc", "fce", "fct", "fcw")):
+        if should_skip_plain_answer_message(
+            message, is_wake_command=getattr(event, "is_at_or_wake_command", False)
+        ):
             return
 
         group_id_raw = event.get_group_id()
@@ -470,7 +543,7 @@ class Mrfzccl(Star):
             return
 
         correct_name = str(player_state.get("name", "") or "")
-        if not correct_name or correct_name not in raw_message:
+        if not correct_name or correct_name.casefold() not in raw_message.casefold():
             return
 
         room_lock = self._get_match_lock(user_id)
@@ -578,9 +651,13 @@ class Mrfzccl(Star):
         yield ccl_match.build_match_start_response(event, result)
 
         # 创建比赛循环任务，用于检查结束条件
-        self.match_loop_task[group_id] = asyncio.create_task(
-            self._match_game_loop(group_id)
+        task = asyncio.create_task(self._match_game_loop(group_id))
+        task.add_done_callback(
+            lambda done_task, gid=group_id: self._log_match_task_failure(
+                gid, done_task
+            )
         )
+        self.match_loop_task[group_id] = task
 
     # 结束比赛命令
     @ccl.command("比赛结束")
@@ -673,187 +750,31 @@ class Mrfzccl(Star):
     # ========== 工具类相关函数 ==========
     # 发送原始图片
     async def send_original_image(self, user_id: str, event: AstrMessageEvent):
-        if user_id in self.original_images:
-            try:
-                original_image = self.original_images[user_id]
-                loop = asyncio.get_running_loop()
-                # 调整图片大小
-                resized_original = await loop.run_in_executor(
-                    None, self.resize_to_target, original_image, self.target_size
-                )
-                # 将图片转换为字节流
-                img_bytes = self.pil_image_to_bytes(resized_original)
-                output_data = event.chain_result(
-                    [Comp.Plain("正确答案的完整立绘:"), Comp.Image.fromBytes(img_bytes)]
-                )
-                self.end_game(user_id)  # 结束游戏
-                return output_data
-            except Exception as e:
-                logger.error(f"[send_original_image] 发送原始图片失败: {e}")
-                self.end_game(user_id)
-                return event.plain_result("发送正确答案图片失败")
-        else:
-            logger.warning(f"[send_original_image] 用户 {user_id} 没有原始图片")
-            return event.plain_result("无法获取正确答案图片")
+        return await self.game_service.send_original_image(user_id, event)
 
-    # 结束游戏并清理资源
     def end_game(self, user_id: str) -> None:
-        self.player.pop(user_id, None)
-        self.original_images.pop(user_id, None)
+        self.game_runtime.end_game(user_id)
 
-    # 获取指定房间的比赛锁
     def _get_match_lock(self, room_id: str) -> asyncio.Lock:
-        now = time.time()
-        self._room_lock_last_used[room_id] = now
+        return self.match_runtime.get_room_lock(room_id)
 
-        lock = self.match_locks.get(room_id)
-        if lock is None:
-            lock = asyncio.Lock()
-            self.match_locks[room_id] = lock
-
-        return lock
-
-    # 判断指定房间是否仍有运行中的比赛任务
     def _room_has_runtime(self, room_id: str) -> bool:
-        """判断该 room_id 是否仍有运行态（游戏/比赛任务）"""
-        data = self.player.get(room_id)
-        if isinstance(data, dict) and data.get("status") in {"active", "loading"}:
-            return True
+        return self.match_runtime.room_has_runtime(room_id)
 
-        if room_id in self.match_question_state:
-            return True
-        if room_id in self.match_next_task:
-            return True
-        if room_id in self.match_loop_task:
-            return True
-        if room_id in self.match_sessions:
-            return True
-
-        return False
-
-    # 清理长期闲置的房间锁，防止内存泄漏
     def _cleanup_stale_room_locks(self, max_idle_hours: int = 24) -> int:
-        """清理长期闲置的 room lock，避免锁字典无限增长。"""
-        try:
-            cutoff = time.time() - float(max_idle_hours) * 3600
-        except Exception:
-            cutoff = time.time() - 24 * 3600
+        return self.match_runtime.cleanup_stale_room_locks(max_idle_hours)
 
-        removed = 0
-
-        # 优先按“闲置时间”清理
-        for rid, lock in list(self.match_locks.items()):
-            last_used = float(self._room_lock_last_used.get(rid, 0) or 0)
-            if last_used and last_used > cutoff:
-                continue
-            if lock.locked():
-                continue
-            if self._room_has_runtime(rid):
-                continue
-            self.match_locks.pop(rid, None)
-            self._room_lock_last_used.pop(rid, None)
-            removed += 1
-
-        return removed
-
-    # 安全取消异步任务
-    @staticmethod
-    def _safe_cancel_task(task: asyncio.Task | None) -> None:
-        if not task:
-            return
-        try:
-            if not task.done():
-                task.cancel()
-        except Exception:
-            pass
-
-    #  清理指定群组的比赛运行时状态
     def _clear_match_runtime(self, group_id: str) -> None:
-        self.match_question_state.pop(group_id, None)
-
-        hint_task = self.match_next_task.pop(group_id, None)
-        self._safe_cancel_task(hint_task)
-
-        loop_task = self.match_loop_task.pop(group_id, None)
-        try:
-            curr_task = asyncio.current_task()
-        except Exception:
-            curr_task = None
-        if loop_task is not curr_task:
-            self._safe_cancel_task(loop_task)
-
-        self.match_sessions.pop(group_id, None)
-
-        # 清理当前群的题目状态（防止比赛结束后仍可继续答题）
-        self.end_game(group_id)
+        self.match_runtime.clear_match_runtime(group_id)
 
     # 获取比赛结束原因
     async def _get_match_end_reason(self, match) -> str | None:
-        """返回比赛结束原因（time_limit/question_limit），不满足则返回 None。"""
-        if not match:
-            return None
+        return await self.match_service.get_match_end_reason(match)
 
-        # 时间限制（分钟）
-        try:
-            time_limit_min = int(getattr(match, "time_limit", 0) or 0)
-        except Exception:
-            time_limit_min = 0
-
-        if time_limit_min > 0:
-            started_at = getattr(match, "started_at", None)
-            if started_at:
-                try:
-                    if datetime.now() - started_at >= timedelta(minutes=time_limit_min):
-                        return "time_limit"
-                except Exception:
-                    pass
-
-        # 题目数量限制：按“正确题数（每题首次答对）”计
-        try:
-            q_limit = int(getattr(match, "question_limit", 0) or 0)
-        except Exception:
-            q_limit = 0
-
-        if q_limit > 0:
-            participants = await self.match_repo.get_participants(match.match_id)
-            try:
-                solved = sum(
-                    int(getattr(p, "correct_count", 0) or 0) for p in participants
-                )
-            except Exception:
-                solved = 0
-            if solved >= q_limit:
-                return "question_limit"
-
-        return None
-
-    # 结束比赛并收集前十名参赛者
     async def _end_match_and_collect_top(
         self, group_id: str, match
     ) -> tuple[str, int, list]:
-        """结束比赛 + 清理运行态 + 返回 Top10 参赛者（已按得分排序），并保存荣誉。"""
-        match_name = getattr(match, "match_name", "比赛")
-        match_id = int(getattr(match, "match_id", 0) or 0)
-
-        await self.match_repo.end_match(match_id)
-        self._clear_match_runtime(group_id)
-
-        participants = await self.match_repo.get_participants(match_id)
-        participants.sort(key=lambda p: p.score, reverse=True)
-        top_participants = participants[:10]
-
-        for i, p in enumerate(top_participants, 1):
-            await self.match_repo.save_honor(
-                p.user_id,
-                match_id,
-                match_name,
-                i,
-                p.correct_count,
-                p.wrong_count,
-                p.score,
-            )
-
-        return match_name, match_id, top_participants
+        return await self.match_service.end_match_and_collect_top(group_id, match)
 
     # 生成下一条提示文本并推进提示计数
     def _next_hint_text_and_advance(self, user_id: str) -> tuple[str, bool]:
@@ -915,126 +836,23 @@ class Mrfzccl(Star):
 
     # 为当前题目安排超时自动提示
     def _schedule_match_hint(self, group_id: str) -> None:
-        """为当前题目安排一次“超时自动提示”。delay<=0 时不启用。"""
-        try:
-            delay = int(self.match_hint_delay or 0)
-        except Exception:
-            delay = 0
-        if delay <= 0:
-            return
+        self.match_service.schedule_match_hint(group_id)
 
-        session = self.match_sessions.get(group_id)
-        if not session:
-            return
-
-        token = self.match_question_state.get(group_id)
-        if not token:
-            return
-
-        # 取消旧任务
-        if group_id in self.match_next_task:
-            self._safe_cancel_task(self.match_next_task.pop(group_id, None))
-
-        self.match_next_task[group_id] = asyncio.create_task(
-            self._match_hint_after_delay(group_id, session, delay, float(token))
-        )
-
-    # 延迟后执行自动提示的循环任务
     async def _match_hint_after_delay(
         self, group_id: str, session: str, delay: int, token: float
     ) -> None:
-        try:
-            interval = max(1, int(delay))
-            while True:
-                await asyncio.sleep(interval)
-
-                if self._shutting_down:
-                    return
-
-                # 题目已变化/被清理：停止当前提示循环
-                if self.match_question_state.get(group_id) != token:
-                    return
-
-                match = await self.match_repo.get_active_match(group_id)
-                if not match or not match.is_active:
-                    return
-
-                if not has_active_game(self.player, group_id):
-                    return
-
-                lock = self._get_match_lock(group_id)
-                async with lock:
-                    # 二次确认：避免刚好答对/结束/切题后仍发送提示
-                    if self.match_question_state.get(group_id) != token:
-                        return
-                    match2 = await self.match_repo.get_active_match(group_id)
-                    if not match2 or not match2.is_active:
-                        return
-                    if not has_active_game(self.player, group_id):
-                        return
-                    hint_text, has_more = self._next_hint_text_and_advance(group_id)
-
-                await self.context.send_message(
-                    session, MessageChain().message(f"💡 超时提示：{hint_text}")
-                )
-                if not has_more:
-                    return
-
-        except asyncio.CancelledError:
-            return
-        except Exception as e:
-            logger.warning(f"[match] 自动提示任务异常 group_id={group_id}: {e}")
+        await self.match_service.match_hint_after_delay(group_id, session, delay, token)
 
     # 加载别名映射
     def _load_aliases(self):
-        alias_str = self.Config.get(
-            "character_aliases", "钛铱:白金,宫羽:澄闪,小刻:刻俄柏,小羊:艾雅法拉"
-        )
-        alias_json_text = self.Config.get(
-            "character_aliases_json",
-            "{}",
-        )
+        alias_settings = self.settings.aliases
         self.alias_map = merge_alias_maps(
-            parse_aliases(alias_str),
-            parse_aliases_json_text(alias_json_text),
+            parse_aliases(alias_settings.character_aliases),
+            parse_aliases_json_text(alias_settings.character_aliases_json),
         )
-        alias_file = self.Config.get(
-            "operator_aliases_path", "arknights_operator_aliases.json"
+        self.operator_aliases_by_name = load_operator_aliases(
+            alias_settings.operator_aliases_path
         )
-        alias_file = Path(alias_file)
-        if not alias_file.is_absolute():
-            alias_file = Path(__file__).resolve().parent / alias_file
-        self.operator_aliases_by_name = load_operator_aliases(alias_file)
-
-    # 初始化游戏，返回临时文件路径
-    def _build_llm_judge_prompt(self, answer: str, guess: str) -> str:
-        prompt = self.llm_judge_prompt or (
-            "你是明日方舟猜题判题器。已知标准答案：{answer}。用户回答：{guess}。"
-            "请只判断用户回答是否可以视为该标准答案。只能输出 True 或 False，不要输出其他任何内容。"
-        )
-        try:
-            return prompt.format(answer=answer, guess=guess)
-        except Exception:
-            return (
-                f"{prompt}\n标准答案：{answer}\n用户回答：{guess}\n"
-                "只能输出 True 或 False，不要输出其他任何内容。"
-            )
-
-    def _parse_llm_judge_result(self, completion_text: str) -> bool | None:
-        text = str(completion_text or "").strip().lower()
-        if not text:
-            return None
-        text = re.sub(r"^[`\"'\s]+|[`\"'\s]+$", "", text)
-        text = re.sub(r"[.。!！?？]+$", "", text)
-        if text == "true":
-            return True
-        if text == "false":
-            return False
-        if re.fullmatch(r'\{\s*"(result|answer|correct)"\s*:\s*true\s*\}', text):
-            return True
-        if re.fullmatch(r'\{\s*"(result|answer|correct)"\s*:\s*false\s*\}', text):
-            return False
-        return None
 
     async def judge_answer_with_llm(
         self,
@@ -1043,524 +861,27 @@ class Mrfzccl(Star):
         *,
         unified_msg_origin: str | None = None,
     ) -> bool:
-        if not bool(getattr(self, "llm_judge_enabled", False)):
-            return False
-
-        provider_id = str(getattr(self, "llm_judge_provider_id", "") or "").strip()
-        if not provider_id:
-            return False
-
-        provider = self.context.get_provider_by_id(provider_id)
-        if not isinstance(provider, Provider):
-            logger.warning(f"[llm_judge] 未找到 Provider: {provider_id}")
-            return False
-
-        prompt = self._build_llm_judge_prompt(answer, guess)
-        msg_origin = str(unified_msg_origin or "").strip() or "unknown"
-        session_id = f"mrfzccl-judge-{msg_origin}-{time.time_ns()}"
-        if bool(getattr(self, "llm_judge_debug", False)):
-            logger.info(
-                "[llm_judge] 输入 provider_id=%s msg_origin=%s answer=%s guess=%s prompt=%s",
-                provider_id,
-                msg_origin,
-                answer,
-                guess,
-                prompt,
-            )
-        max_attempts = 1 + max(
-            0,
-            int(getattr(self, "llm_judge_max_retries", 0) or 0)
-            if getattr(self, "llm_judge_enable_retry", False)
-            else 0,
+        self.llm_judge_service.context = self.context
+        return await self.llm_judge_service.judge_answer(
+            answer, guess, unified_msg_origin=unified_msg_origin
         )
 
-        for attempt in range(1, max_attempts + 1):
-            try:
-                response = await provider.text_chat(
-                    prompt=prompt,
-                    session_id=session_id,
-                )
-                completion_text = str(getattr(response, "completion_text", "") or "")
-                if bool(getattr(self, "llm_judge_debug", False)):
-                    logger.info(
-                        "[llm_judge] 输出 msg_origin=%s raw_completion=%s",
-                        msg_origin,
-                        completion_text,
-                    )
-                result = self._parse_llm_judge_result(completion_text)
-                if result is None:
-                    raise ValueError(f"LLM 判题输出不合法: {completion_text}")
-                if bool(getattr(self, "llm_judge_debug", False)):
-                    logger.info("[llm_judge] 解析结果 parsed_result=%s", result)
-                return result
-            except Exception as exc:
-                if attempt >= max_attempts:
-                    logger.warning(f"[llm_judge] 判题失败: {exc}")
-                    return False
-                retry_interval = float(
-                    getattr(self, "llm_judge_retry_interval_seconds", 0.0) or 0.0
-                )
-                logger.warning(
-                    f"[llm_judge] 判题失败，准备重试 ({attempt}/{max_attempts}): {exc}"
-                )
-                if retry_interval > 0:
-                    await asyncio.sleep(retry_interval)
-
-        return False
-
     async def fc_init(self, user_id: str) -> bytes | str | None:
-        existing = self.player.get(user_id)
-        if existing and existing.get("status") in {"active", "loading"}:
-            return "already_exists"
-        self.player[user_id] = {"status": "loading"}  # 设置加载状态
-        try:
-            # 提取题目
-            question = await self.extract_questions()
-            if not question:
-                logger.error("[fc_init] 提取题目失败")
-                self.player.pop(user_id, None)
-                return None
-            try:
-                # 从URL获取图片
-                image = await self.get_image_from_url(question["url"])
-                if not image:
-                    logger.error("[fc_init] 获取图片失败")
-                    self.player.pop(user_id, None)
-                    return None
-            except Exception as e:
-                logger.error(f"[fc_init] 获取图片失败,e:{e}")
-                self.player.pop(user_id, None)
-                return None
+        return await self.game_service.start_game(user_id)
 
-            # 保存原始图片
-            self.original_images[user_id] = image.copy()
-            question["status"] = "active"
-            self.player[user_id] = question
-
-            loop = asyncio.get_running_loop()
-
-            # 根据概率选择难度（遮罩数量）
-            r = random.random()
-            cumulative = self.easy_probability
-            if r < cumulative:
-                block_count = 5  # 简单：5个遮罩
-            elif r < cumulative + self.medium_probability:
-                block_count = 3  # 中等：3个遮罩
-            else:
-                block_count = 1  # 困难：1个遮罩
-
-            # 生成遮罩图片
-            result, _ = await loop.run_in_executor(
-                None, self.mask_image_with_random_blocks, image, block_count
-            )
-            # 调整图片大小
-            resized = await loop.run_in_executor(
-                None, self.resize_to_target, result, self.target_size
-            )
-            # 转换为字节流
-            img_bytes = self.pil_image_to_bytes(resized)
-            return img_bytes
-        except Exception as e:
-            logger.error(f"[fc_init] 初始化失败: {e}")
-            logger.error(traceback.format_exc())
-            if user_id in self.player:
-                self.player.pop(user_id, None)
-            return None
-
-    # 获取明日方舟猜猜乐题目
     async def extract_questions(self) -> Optional[Dict[str, Any]]:
-        try:
-            if not self.data:
-                logger.error("[extract_questions] 数据未加载")
-                return None
+        return self.question_picker.pick()
 
-            # ===== 构建候选缓存（一次性扫描，后续 O(1) 抽样）=====
-            cache_data_id = getattr(self, "_question_cache_data_id", None)
-            cache_kw_sig = getattr(self, "_question_cache_kw_sig", None)
-            data_id = id(self.data)
-            kw_sig = tuple(
-                kw
-                for kw in (self.low_weight_keywords or [])
-                if isinstance(kw, str) and kw
-            )
-
-            if (
-                cache_data_id != data_id
-                or cache_kw_sig != kw_sig
-                or not hasattr(self, "_question_candidate_names")
-                or not hasattr(self, "_question_candidate_urls")
-            ):
-
-                def is_blocked_ip(hostname: Optional[str]) -> bool:
-                    if not hostname:
-                        return True
-                    if str(hostname).strip().lower() == "localhost":
-                        return True
-                    try:
-                        ip = ipaddress.ip_address(hostname)
-                    except ValueError:
-                        return False
-                    return not ip.is_global
-
-                candidate_names: list[str] = []
-                candidate_urls: list[list[str]] = []
-                is_low_weight: list[bool] = []
-
-                low_keywords = [kw.strip() for kw in kw_sig if kw.strip()]
-
-                for name, character_data in self.data.items():
-                    if not isinstance(name, str) or not name:
-                        continue
-                    if not isinstance(character_data, dict):
-                        continue
-                    urls = character_data.get("original_url", None)
-                    if not isinstance(urls, list) or not urls:
-                        continue
-
-                    valid_urls: list[str] = []
-                    for u in urls:
-                        if not isinstance(u, str):
-                            continue
-                        u = u.strip()
-                        if not u or len(u) > 2048:
-                            continue
-                        parsed = urlparse(u)
-                        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-                            continue
-                        if is_blocked_ip(parsed.hostname):
-                            continue
-                        valid_urls.append(u)
-
-                    if not valid_urls:
-                        continue
-
-                    candidate_names.append(name)
-                    candidate_urls.append(valid_urls)
-                    is_low_weight.append(any(kw in name for kw in low_keywords))
-
-                if not candidate_names:
-                    logger.error(
-                        "[extract_questions] 无可用题库（请检查 original_url 配置）"
-                    )
-                    return None
-
-                self._question_candidate_names = np.array(candidate_names, dtype=object)
-                self._question_candidate_urls = candidate_urls
-                lw_mask = np.array(is_low_weight, dtype=bool)
-                self._question_candidate_low_idx = np.flatnonzero(lw_mask)
-                self._question_candidate_normal_idx = np.flatnonzero(~lw_mask)
-                self._question_cache_data_id = data_id
-                self._question_cache_kw_sig = kw_sig
-
-            # ===== 随机抽题：使用 numpy RNG + 拒绝采样避免扫全表 =====
-            rng = getattr(self, "_question_rng", None)
-            if rng is None:
-                rng = np.random.default_rng()
-                self._question_rng = rng
-
-            names_arr = self._question_candidate_names
-            low_idx = getattr(
-                self, "_question_candidate_low_idx", np.array([], dtype=int)
-            )
-            normal_idx = getattr(
-                self, "_question_candidate_normal_idx", np.array([], dtype=int)
-            )
-
-            recent_set = set(self.recent_characters or [])
-            # 如果候选数量小于 recent 记录，会导致无法抽到新题：直接清空
-            if len(recent_set) >= len(names_arr):
-                self.recent_characters = []
-                recent_set = set()
-
-            available_count = max(1, len(names_arr) - len(recent_set))
-            try:
-                low_prob = float(self.low_weight_ratio) / float(available_count)
-            except Exception:
-                low_prob = 0.0
-            low_prob = max(0.0, min(1.0, low_prob))
-
-            use_low = (
-                low_idx.size > 0 and normal_idx.size > 0 and rng.random() < low_prob
-            )
-            primary_pool = (
-                low_idx if use_low else (normal_idx if normal_idx.size > 0 else low_idx)
-            )
-            secondary_pool = normal_idx if primary_pool is low_idx else low_idx
-            if primary_pool.size == 0:
-                primary_pool = np.arange(len(names_arr), dtype=int)
-                secondary_pool = np.array([], dtype=int)
-
-            def pick_index(pool_arr: np.ndarray) -> Optional[int]:
-                if pool_arr.size == 0:
-                    return None
-                for _ in range(60):
-                    idx = int(pool_arr[int(rng.integers(pool_arr.size))])
-                    if str(names_arr[idx]) not in recent_set:
-                        return idx
-                for idx in pool_arr:
-                    i = int(idx)
-                    if str(names_arr[i]) not in recent_set:
-                        return i
-                return None
-
-            picked = pick_index(primary_pool)
-            if picked is None:
-                picked = pick_index(secondary_pool)
-            if picked is None:
-                self.recent_characters = []
-                recent_set = set()
-                picked = pick_index(primary_pool)
-                if picked is None:
-                    picked = pick_index(secondary_pool)
-                if picked is None:
-                    picked = int(rng.integers(len(names_arr)))
-
-            random_name = str(names_arr[picked])
-            url_list = self._question_candidate_urls[picked]
-            random_url = url_list[int(rng.integers(len(url_list)))]
-
-            # 更新最近干员列表
-            self.recent_characters.append(random_name)
-            if len(self.recent_characters) > self.max_recent_count:
-                self.recent_characters.pop(0)
-
-            return {"name": random_name, "url": random_url, "fctn": 0}
-        except (KeyError, IndexError, TypeError) as e:
-            logger.error(f"[extract_questions] 提取题目失败: {e}")
-            return None
-        except Exception as e:
-            logger.error(f"[extract_questions] 提取题目时发生未知错误: {e}")
-            logger.error(traceback.format_exc())
-            return None
-
-    # 路径处理
-    def _get_absolute_path(self, path: str) -> str:
-        if not path:
-            raise ValueError("路径不能为空")
-        return os.path.abspath(path)
-
-    # 从URL异步获取图片
     async def get_image_from_url(
         self, url: str, timeout: int = 10
     ) -> Optional[Image.Image]:
-        # 检查URL协议
-        if not url.startswith(("http://", "https://")):
-            raise ValueError(f"无效的URL协议: {url}")
+        return await self.image_downloader.get_image_from_url(
+            url,
+            timeout=timeout,
+            max_retries=self.image_download_max_retries,
+            retry_interval_seconds=self.image_download_retry_interval_seconds,
+        )
 
-        # 安全检查：防止访问内网地址
-        parsed_url = urlparse(url)
-        hostname = parsed_url.hostname
-        if hostname:
-            hostname_norm = str(hostname).strip().lower()
-            if hostname_norm == "localhost":
-                raise ValueError(f"禁止访问内网地址: {hostname}")
-            try:
-                ip = ipaddress.ip_address(hostname_norm)
-            except ValueError:
-                ip = None
-            if ip and not ip.is_global:
-                raise ValueError(f"禁止访问内网地址: {hostname}")
-
-        max_attempts = max(1, int(getattr(self, "image_download_max_retries", 2)) + 1)
-        last_error: Exception | None = None
-
-        for attempt in range(1, max_attempts + 1):
-            try:
-                # 获取HTTP会话
-                session = await self._get_session()
-                async with session.get(
-                    url,
-                    ssl=False,  # 忽略SSL证书验证
-                ) as response:
-                    if response.status != 200:
-                        raise Exception(f"HTTP {response.status}: {response.reason}")
-
-                    # 读取响应内容
-                    content = await response.read()
-                    if len(content) == 0:
-                        raise Exception("下载的图片数据为空")
-                    if len(content) > 10 * 1024 * 1024:  # 限制10MB
-                        raise Exception("图片文件过大")
-
-                    # 在线程池中加载图片
-                    loop = asyncio.get_running_loop()
-                    image = await loop.run_in_executor(
-                        None, self._load_image_from_bytes, content
-                    )
-                    return image
-            except ValueError:
-                raise
-            except (aiohttp.ClientError, Exception) as e:
-                last_error = e
-                if attempt >= max_attempts:
-                    break
-                logger.warning(
-                    f"[get_image_from_url] 获取 bilibili wiki 图片失败，准备重试 "
-                    f"({attempt}/{max_attempts - 1}): {e}"
-                )
-                retry_interval = float(
-                    getattr(self, "image_download_retry_interval_seconds", 0.0) or 0.0
-                )
-                if retry_interval > 0:
-                    await asyncio.sleep(retry_interval)
-
-        if isinstance(last_error, aiohttp.ClientError):
-            logger.error(f"[get_image_from_url] 请求失败: {last_error}")
-            raise last_error
-        if last_error is not None:
-            logger.error(f"[get_image_from_url] 处理图片时出错: {last_error}")
-            raise last_error
-        raise RuntimeError("获取图片失败，未捕获到具体错误")
-
-    # 同步加载图片（在线程池中执行）
-    def _load_image_from_bytes(self, content: bytes) -> Image.Image:
-        image = Image.open(BytesIO(content))
-        # 检查图片格式
-        if image.format not in ["JPEG", "PNG", "GIF", "WEBP", "BMP"]:
-            raise Exception(f"不支持的图片格式: {image.format}")
-        image.load()
-
-        # 检查图片尺寸
-        width, height = image.size
-        if width > 5000 or height > 5000:
-            raise Exception(f"图片尺寸过大: {width}x{height}")
-        return image
-
-    # 提取并清理用户输入
-    def extract_and_sanitize_input(self, text: str, keyword: str) -> str:
-        if not text or not keyword:
-            return ""
-        # 使用正则表达式提取关键词后的内容
-        pattern = rf"{re.escape(keyword)}\s*(.*)"
-        match = re.search(pattern, text)
-        if not match:
-            return ""
-        user_input = match.group(1).strip()
-        # 清理特殊字符
-        cleaned = re.sub(r"[^\u4e00-\u9fa5a-zA-Z0-9\s]", "", user_input)
-        # 限制长度
-        if len(cleaned) > 50:
-            cleaned = cleaned[:50]
-        return cleaned
-
-    # 遮挡图生成
-    def mask_image_with_random_blocks(
-        self,
-        image: Image.Image,
-        block_count: int = 5,
-        mask_color: Tuple[int, int, int] = (0, 0, 0),
-        min_width_percent: int = 10,
-        max_width_percent: int = 20,
-        min_height_percent: int = 10,
-        max_height_percent: int = 20,
-        min_gap_percent: int = 2,
-        avoid_edges: bool = True,
-    ) -> Tuple[Image.Image, List[Tuple[int, int, int, int]]]:
-        """
-        高性能遮罩图片，只露出几个小方块，保持原始游戏逻辑
-
-        参数:
-            image: 原始图片
-            block_count: 遮罩方块数量
-            mask_color: 遮罩颜色(RGB)
-            min/max_width/height_percent: 方块尺寸范围（图片尺寸的百分比）
-            min_gap_percent: 方块间最小间距（图片尺寸的百分比）
-            avoid_edges: 是否避免边缘
-
-        返回:
-            Tuple[遮罩后的图片, 方块坐标列表]
-        """
-        # 转换为RGBA模式（如果不是）
-        if image.mode != "RGBA":
-            original_rgba = image.convert("RGBA")
-        else:
-            original_rgba = image.copy()
-
-        width, height = original_rgba.size
-        arr = np.array(original_rgba)
-
-        # 创建遮罩层，填充 mask_color 并全覆盖
-        mask_layer = np.zeros_like(arr)
-        mask_layer[..., 0] = mask_color[0]
-        mask_layer[..., 1] = mask_color[1]
-        mask_layer[..., 2] = mask_color[2]
-        mask_layer[..., 3] = 255  # 全不透明
-
-        # 计算方块尺寸范围（像素）
-        min_width = max(5, int(width * min_width_percent / 100))
-        max_width = max(min_width, int(width * max_width_percent / 100))
-        min_height = max(5, int(height * min_height_percent / 100))
-        max_height = max(min_height, int(height * max_height_percent / 100))
-        min_gap = int(min(width, height) * min_gap_percent / 100)
-        edge_margin = min_gap if avoid_edges else 0
-
-        blocks = []  # 存储方块坐标
-
-        # 生成随机方块
-        for _ in range(block_count):
-            for attempt in range(100):  # 最多尝试100次
-                # 随机方块尺寸
-                w = random.randint(min_width, max_width)
-                h = random.randint(min_height, max_height)
-                max_x = width - w - edge_margin
-                max_y = height - h - edge_margin
-                if max_x <= edge_margin or max_y <= edge_margin:
-                    break
-
-                # 随机位置
-                x1 = random.randint(edge_margin, max_x)
-                y1 = random.randint(edge_margin, max_y)
-                x2, y2 = x1 + w, y1 + h
-
-                # 检查是否与已有方块冲突
-                conflict = False
-                for bx1, by1, bx2, by2 in blocks:
-                    if not (
-                        x2 + min_gap < bx1
-                        or x1 > bx2 + min_gap
-                        or y2 + min_gap < by1
-                        or y1 > by2 + min_gap
-                    ):
-                        conflict = True
-                        break
-
-                if not conflict:
-                    blocks.append((x1, y1, x2, y2))
-                    mask_layer[y1:y2, x1:x2, 3] = 0  # 方块区域透明
-                    break
-
-        # alpha 合成：遮罩层覆盖原图
-        alpha = mask_layer[..., 3:4] / 255.0
-        result_arr = arr * (1 - alpha) + mask_layer * alpha
-        result_arr = result_arr.astype(np.uint8)
-        result = Image.fromarray(result_arr, "RGBA")
-        return result, blocks
-
-    # 按比例缩放图像，保持宽高比
-    def resize_to_target(self, image: Image.Image, target_size: int) -> Image.Image:
-        if target_size <= 0:
-            target_size = 800
-        w, h = image.size
-        # 根据宽高比例计算新尺寸
-        if w >= h:
-            new_w = target_size
-            new_h = int(target_size * h / w)
-        else:
-            new_h = target_size
-            new_w = int(target_size * w / h)
-        # 确保最小尺寸
-        new_w = max(new_w, 100)
-        new_h = max(new_h, 100)
-        # 使用LANCZOS重采样算法（高质量）
-        return image.resize((new_w, new_h), Image.Resampling.LANCZOS)
-
-    # pil图片转变为bytes
-    def pil_image_to_bytes(self, image: Image.Image, format: str = "PNG") -> bytes:
-        buf = BytesIO()
-        image.save(buf, format=format, optimize=True)  # optimize优化图片大小
-        return buf.getvalue()
-
-    # 主动消息发送比赛排行榜
     async def _send_match_leaderboard_to_session(
         self,
         session: str,
@@ -1568,93 +889,26 @@ class Mrfzccl(Star):
         top_participants: list,
         title: str,
     ) -> None:
-        """主动消息发送比赛排行榜（优先图片，失败回退文本）。"""
-        if self._shutting_down:
-            return
+        await self.match_service.send_match_leaderboard_to_session(
+            session, match_name, top_participants, title
+        )
+
+    def _log_match_task_failure(self, group_id: str, task: asyncio.Task) -> None:
         try:
-            image_path = await self.renderer.generate_match_leaderboard_image(
-                match_name,
-                top_participants,
-                title=title,
+            exc = task.exception()
+        except asyncio.CancelledError:
+            return
+        except Exception as err:
+            logger.warning(f"[Mrfzccl][match] failed to inspect loop task: {err}")
+            return
+        if exc is not None:
+            logger.error(
+                f"[Mrfzccl][match] loop task failed, group_id={group_id}",
+                exc_info=(type(exc), exc, exc.__traceback__),
             )
-            if image_path and os.path.exists(image_path):
-                try:
-                    await self.context.send_message(
-                        session, MessageChain().file_image(image_path)
-                    )
-                    return
-                except Exception as e:
-                    logger.warning(f"[match] 主动发送排行榜图片失败，回退文本: {e}")
-        except Exception as e:
-            logger.warning(f"[match] 比赛排行榜图片发送失败，回退文本: {e}")
 
-        text = generate_match_leaderboard_text(match_name, top_participants, ended=True)
-        try:
-            await self.context.send_message(session, MessageChain().message(text))
-        except Exception as e:
-            logger.warning(f"[match] 主动发送排行榜文本失败: {e}")
-
-    # 比赛游戏循环 - 用于检查结束条件
     async def _match_game_loop(self, group_id: str):
-        await asyncio.sleep(2)
-
-        while not self._shutting_down:
-            await asyncio.sleep(5)
-
-            match = await self.match_repo.get_active_match(group_id)
-            if not match or not match.is_active:
-                return
-
-            end_reason = await self._get_match_end_reason(match)
-            if not end_reason:
-                continue
-
-            lock = self._get_match_lock(group_id)
-            session = None
-            reason_text = ""
-            match_name = ""
-            top_participants = []
-            async with lock:
-                # 二次确认，避免与管理员/答题正确的自动结束并发导致重复结算
-                match2 = await self.match_repo.get_active_match(group_id)
-                if not match2 or not match2.is_active:
-                    return
-
-                session = self.match_sessions.get(group_id)
-                if end_reason == "time_limit":
-                    reason_text = (
-                        f"⏱️ 已达到时间限制，比赛「{match2.match_name}」自动结束！"
-                    )
-                else:
-                    reason_text = (
-                        f"📝 已达到题目上限，比赛「{match2.match_name}」自动结束！"
-                    )
-
-                match_name, _, top_participants = await self._end_match_and_collect_top(
-                    group_id, match2
-                )
-
-                if not session:
-                    logger.warning(
-                        f"[match] 缺少 session，无法主动发送比赛结束消息 group_id={group_id}"
-                    )
-                    return
-
-            try:
-                await self.context.send_message(
-                    session, MessageChain().message(reason_text)
-                )
-                await self._send_match_leaderboard_to_session(
-                    session=session,
-                    match_name=match_name,
-                    top_participants=top_participants,
-                    title=f"比赛「{match_name}」已结束排行榜",
-                )
-            except Exception as e:
-                logger.warning(
-                    f"[match] 主动发送比赛结束消息失败 group_id={group_id}: {e}"
-                )
-            return
+        await self.match_service.match_game_loop(group_id)
 
     # 插件初始化时
     async def initialize(self):
@@ -1665,18 +919,28 @@ class Mrfzccl(Star):
     async def terminate(self):
         self._shutting_down = True
         # 取消比赛相关任务（防止卸载后仍在后台发送消息）
-        for task in list(self.match_next_task.values()):
-            self._safe_cancel_task(task)
-        for task in list(self.match_loop_task.values()):
-            self._safe_cancel_task(task)
-        self.match_next_task.clear()
-        self.match_loop_task.clear()
-        self.match_sessions.clear()
-        self.match_question_state.clear()
+        self.match_runtime.cancel_all_match_tasks()
+        self.match_locks.clear()
+        self._room_lock_last_used.clear()
+
+        for image in list(self.original_images.values()):
+            try:
+                image.close()
+            except Exception as exc:
+                logger.debug(f"[Mrfzccl] failed to close original image: {exc}")
+        self.original_images.clear()
+        self.player.clear()
 
         if self._session and not self._session.closed:
             await self._session.close()
-            logger.debug("[Mrfzccl] HTTP会话已关闭")
+            logger.debug("[Mrfzccl] HTTP session closed")
+
+        engine = getattr(getattr(self, "db", None), "engine", None)
+        if engine is not None:
+            result = engine.dispose()
+            if hasattr(result, "__await__"):
+                await result
+            logger.debug("[Mrfzccl] database engine disposed")
 
     # 获取或创建 HTTP 会话
     async def _get_session(self) -> aiohttp.ClientSession:

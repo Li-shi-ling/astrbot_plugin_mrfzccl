@@ -3,22 +3,29 @@ from __future__ import annotations
 import time
 import traceback
 from collections.abc import AsyncIterator
-from difflib import SequenceMatcher
 from typing import Any
 
 import astrbot.api.message_components as Comp
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 
+from ..gameplay.judging import (
+    MatchSettings,
+    get_answer_match_details,
+    is_matching_answer,
+    is_recent_previous_match_answer,
+    is_recent_previous_match_answer_with_llm,
+    can_check_recent_previous_match_answer,
+)
 from ..tool import (
-    calculate_char_coverage_set,
     check_daily_limit,
-    check_homophone,
     generate_image_or_fallback,
     generate_match_leaderboard_text,
     has_active_game,
     is_exact_operator_alias_match,
+    extract_and_sanitize_input,
     resolve_alias,
+    safe_cancel_task,
 )
 
 
@@ -26,85 +33,36 @@ from ..tool import (
 def _get_answer_match_details(
     self, answer: str, guess: str
 ) -> tuple[float, float, bool, bool]:
-    similarity = SequenceMatcher(None, answer, guess).ratio()
-    coverage = calculate_char_coverage_set(answer, guess)
-    exact_match = answer == guess
-    homophone_match = check_homophone(
-        answer, guess, enable_homophone=self.enable_homophone
-    )
-    similarity_match = getattr(self, "enable_similarity_match", True) and (
-        similarity > self.similarity_threshold
-    )
-    coverage_match = getattr(self, "enable_character_coverage_match", True) and (
-        coverage > self.calculate_threshold
-    )
-    is_correct = exact_match or similarity_match or coverage_match or homophone_match
-    return similarity, coverage, homophone_match, is_correct
+    return get_answer_match_details(answer, guess, _judge_settings_from_plugin(self))
 
 
 # 判断当前输入是否可以视为正确答案。
 def _is_matching_answer(self, answer: str, guess: str) -> bool:
-    alias_match_enabled = getattr(self, "enable_operator_alias_match", True)
-    if alias_match_enabled and is_exact_operator_alias_match(
-        answer, guess, getattr(self, "operator_aliases_by_name", {})
-    ):
-        return True
-    _, _, _, is_correct = _get_answer_match_details(self, answer, guess)
-    return is_correct
+    return is_matching_answer(
+        answer,
+        guess,
+        aliases_by_name=getattr(self, "operator_aliases_by_name", {}),
+        settings=_judge_settings_from_plugin(self),
+    )
 
 
 # 判断当前输入是否命中比赛宽限期内的上一题答案。
 def _is_recent_previous_match_answer(
     self, player_state: dict[str, Any], guess: str
 ) -> bool:
-    previous_answer = player_state.get("previous_answer")
-    switched_at = player_state.get("previous_answer_switched_at")
-    if not previous_answer or switched_at is None:
-        return False
-
-    grace_period = max(
-        0.0, float(getattr(self, "match_answer_grace_period", 3.0) or 0.0)
+    return is_recent_previous_match_answer(
+        player_state,
+        guess,
+        alias_map=getattr(self, "alias_map", {}),
+        aliases_by_name=getattr(self, "operator_aliases_by_name", {}),
+        settings=_judge_settings_from_plugin(self),
     )
-    if grace_period <= 0:
-        return False
-
-    try:
-        switched_at_ts = float(switched_at)
-    except (TypeError, ValueError):
-        return False
-
-    if time.time() - switched_at_ts > grace_period:
-        return False
-
-    previous_answer_text = str(previous_answer)
-    if _is_matching_answer(self, previous_answer_text, guess):
-        return True
-
-    normalized_guess = resolve_alias(guess, getattr(self, "alias_map", {}))
-    if normalized_guess == guess:
-        return False
-
-    return _is_matching_answer(self, previous_answer_text, normalized_guess)
 
 
 def _can_check_recent_previous_match_answer(self, player_state: dict[str, Any]) -> bool:
-    previous_answer = player_state.get("previous_answer")
-    switched_at = player_state.get("previous_answer_switched_at")
-    if not previous_answer or switched_at is None:
-        return False
-
-    grace_period = max(
-        0.0, float(getattr(self, "match_answer_grace_period", 3.0) or 0.0)
+    return can_check_recent_previous_match_answer(
+        player_state, _judge_settings_from_plugin(self)
     )
-    if grace_period <= 0:
-        return False
-
-    try:
-        switched_at_ts = float(switched_at)
-    except (TypeError, ValueError):
-        return False
-
-    return time.time() - switched_at_ts <= grace_period
 
 
 async def _is_recent_previous_match_answer_with_llm(
@@ -113,31 +71,31 @@ async def _is_recent_previous_match_answer_with_llm(
     guess: str,
     unified_msg_origin: str | None = None,
 ) -> bool:
-    if _is_recent_previous_match_answer(self, player_state, guess):
-        return True
-    if not _can_check_recent_previous_match_answer(self, player_state):
-        return False
-
-    previous_answer = player_state.get("previous_answer")
-    if not previous_answer:
-        return False
-
-    previous_answer_text = str(previous_answer)
-    if await self.judge_answer_with_llm(
-        previous_answer_text,
+    return await is_recent_previous_match_answer_with_llm(
+        player_state,
         guess,
+        alias_map=getattr(self, "alias_map", {}),
+        aliases_by_name=getattr(self, "operator_aliases_by_name", {}),
+        settings=_judge_settings_from_plugin(self),
+        llm_judge=self.judge_answer_with_llm,
         unified_msg_origin=unified_msg_origin,
-    ):
-        return True
+    )
 
-    normalized_guess = resolve_alias(guess, getattr(self, "alias_map", {}))
-    if normalized_guess == guess:
-        return False
 
-    return await self.judge_answer_with_llm(
-        previous_answer_text,
-        normalized_guess,
-        unified_msg_origin=unified_msg_origin,
+def _judge_settings_from_plugin(self) -> MatchSettings:
+    existing = getattr(self, "judge_settings", None)
+    if isinstance(existing, MatchSettings):
+        return existing
+    return MatchSettings(
+        similarity_threshold=getattr(self, "similarity_threshold", 0.5),
+        calculate_threshold=getattr(self, "calculate_threshold", 0.5),
+        enable_similarity_match=getattr(self, "enable_similarity_match", True),
+        enable_character_coverage_match=getattr(
+            self, "enable_character_coverage_match", True
+        ),
+        enable_homophone=getattr(self, "enable_homophone", False),
+        enable_operator_alias_match=getattr(self, "enable_operator_alias_match", True),
+        match_answer_grace_period=getattr(self, "match_answer_grace_period", 3.0),
     )
 
 
@@ -151,7 +109,7 @@ async def handle_fc(
     is_group: bool,
     group_id: str | None,
 ) -> Any | None:
-    """Core logic for `/fc` (expects room lock is held by caller)."""
+    """/fc 的核心逻辑（调用方已持有房间锁）。"""
     response = None
 
     # 检查是否在比赛模式和是否限制（仅群聊）
@@ -183,8 +141,8 @@ async def handle_fc(
                     ]
                 )
         except Exception as e:
-            logger.error(f"[fc] 命令执行失败: {e}")
-            logger.error(traceback.format_exc())
+            logger.error(f"[Mrfzccl][fc] 命令执行失败: {e}")
+            logger.debug(f"[Mrfzccl][fc] {traceback.format_exc()}")
             response = event.plain_result("游戏初始化失败，请稍后重试")
 
     return response
@@ -201,7 +159,7 @@ async def handle_fcc(
     group_id: str | None,
     guess_text_override: str | None = None,
 ) -> tuple[list[Any], tuple[str, list] | None]:
-    """Core logic for `/fcc` (expects room lock is held by caller)."""
+    """/fcc 的核心逻辑（调用方已持有房间锁）。"""
     responses: list[Any] = []
 
     match_end_payload: tuple[str, list] | None = (
@@ -209,7 +167,7 @@ async def handle_fcc(
     )
 
     logger.debug(
-        f"[fcc] 用户ID={user_id}, 当前房间键={list(self.player.keys())}, 是否有激活游戏={has_active_game(self.player, user_id)}"
+        f"[Mrfzccl][fcc] 用户ID={user_id}, 当前房间键={list(self.player.keys())}, 是否有激活游戏={has_active_game(self.player, user_id)}"
     )
 
     # 检查是否有活跃比赛
@@ -227,7 +185,7 @@ async def handle_fcc(
     guess_text = (
         str(guess_text_override).strip()
         if guess_text_override is not None
-        else self.extract_and_sanitize_input(event.message_str, "fcc")
+        else extract_and_sanitize_input(event.message_str, "fcc")
     )
     if not guess_text:
         responses.append(
@@ -279,7 +237,7 @@ async def handle_fcc(
         )
 
     logger.debug(
-        f"[答题判断] 正确答案: {correct_name}, 用户回答: {guess_text}, 解析后: {resolved_guess}, 别名精确匹配: {exact_alias_match}, 相似度: {similarity:.2f}, "
+        f"[Mrfzccl][答题判断] 正确答案: {correct_name}, 用户回答: {guess_text}, 解析后: {resolved_guess}, 别名精确匹配: {exact_alias_match}, 相似度: {similarity:.2f}, "
         f"字匹配率: {calculate:.2f}, 同音匹配: {homophone_match}, LLM 判题: {llm_match_correct}, 阈值: {self.similarity_threshold}/{self.calculate_threshold}, "
         f"结果: {is_correct}"
     )
@@ -298,10 +256,10 @@ async def handle_fcc(
             )
             # 取消当前题目的自动提示任务
             if group_id in self.match_next_task:
-                self._safe_cancel_task(self.match_next_task.pop(group_id, None))
+                safe_cancel_task(self.match_next_task.pop(group_id, None))
         elif previous_answer_matched:
             logger.debug(
-                f"[fcc] 忽略上一题宽限期内的迟到正确答案，群ID={group_id}，发送者ID={sender_id}，回答={resolved_guess}"
+                f"[Mrfzccl][fcc] 忽略上一题宽限期内的迟到正确答案，群ID={group_id}，发送者ID={sender_id}，回答={resolved_guess}"
             )
         else:
             await self.match_repo.increment_participant_wrong(
@@ -411,7 +369,7 @@ async def handle_other_fcc(
     is_group: bool,
     group_id: str | None,
 ) -> tuple[list[Any], tuple[str, list] | None]:
-    """Core logic for plain-text exact-answer hits during an active game."""
+    """游戏进行中，纯文本精确命中答案的核心逻辑。"""
     if not has_active_game(self.player, user_id):
         return [], None
 
@@ -424,7 +382,7 @@ async def handle_other_fcc(
         return [], None
 
     correct_name = str(player_state.get("name", "") or "")
-    if not correct_name or correct_name not in raw_message:
+    if not correct_name or correct_name.casefold() not in raw_message.casefold():
         return [], None
 
     return await handle_fcc(
@@ -444,7 +402,7 @@ async def iter_match_end_leaderboard(
     event: AstrMessageEvent,
     match_end_payload: tuple[str, list],
 ) -> AsyncIterator[Any]:
-    """Post-lock output for `/fcc` when a match ends (image preferred, text fallback)."""
+    """/fcc 比赛结束后的锁外输出（图片优先，文本回退）。"""
     ended_match_name, ended_top_participants = match_end_payload
     async for result in generate_image_or_fallback(
         event=event,
@@ -472,7 +430,7 @@ async def handle_fce(
     is_group: bool,
     group_id: str | None,
 ) -> list[Any]:
-    """Core logic for `/fce` (expects room lock is held by caller)."""
+    """/fce 的核心逻辑（调用方已持有房间锁）。"""
     responses: list[Any] = []
 
     # 检查比赛模式下是否有权限
@@ -503,7 +461,7 @@ async def handle_fct(
     is_group: bool,
     group_id: str | None,
 ) -> Any | None:
-    """Core logic for `/fct` (expects room lock is held by caller)."""
+    """/fct 的核心逻辑（调用方已持有房间锁）。"""
     # 检查比赛模式下是否有权限（仅群聊）
     match = await self.match_repo.get_active_match(group_id) if is_group else None
     if match and self.admin_ids and sender_id not in [str(x) for x in self.admin_ids]:
@@ -533,7 +491,7 @@ async def handle_fcw(
     is_group: bool,
     group_id: str | None,
 ) -> Any | None:
-    """Core logic for `/fcw` (expects room lock is held by caller)."""
+    """/fcw 的核心逻辑（调用方已持有房间锁）。"""
     # 检查比赛模式下是否有权限（仅群聊）
     match = await self.match_repo.get_active_match(group_id) if is_group else None
     if match and self.admin_ids and sender_id not in [str(x) for x in self.admin_ids]:
@@ -543,8 +501,9 @@ async def handle_fcw(
     else:
         char_data = self.data.get(self.player[user_id]["name"], {})
 
-        logger.info(
-            f"[fcw] player={self.player[user_id]}, char_data keys={list(char_data.keys()) if char_data else 'None'}"
+        logger.debug(
+            f"[Mrfzccl][fcw] user={user_id} fctn={self.player[user_id].get('fctn')}, "
+            f"char_data keys={list(char_data.keys()) if char_data else 'None'}"
         )
 
         # 获取职业及分支

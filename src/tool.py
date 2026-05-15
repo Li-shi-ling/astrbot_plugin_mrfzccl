@@ -1,15 +1,22 @@
-import os
-import re
+import asyncio
 import json
-from pathlib import Path
-from datetime import datetime
+import os
+import random
+import re
 from collections import Counter
-from pypinyin import lazy_pinyin, Style
-from typing import Any, Callable, Iterable, Mapping, Optional
+from collections.abc import Callable, Iterable, Mapping
+from datetime import datetime
+from io import BytesIO
+from pathlib import Path
+from typing import Any
 
+import numpy as np
+from PIL import Image
+from pypinyin import Style, lazy_pinyin
+
+import astrbot.api.message_components as Comp
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
-import astrbot.api.message_components as Comp
 
 
 # 计算去重后字符集合的覆盖率。
@@ -71,7 +78,7 @@ def calculate_char_coverage_counter(correct_name: str, guess_text: str) -> float
 
 # 生成正确次数排行榜的文本内容。
 def generate_correct_leaderboard_text(
-    users: Iterable[Any], summary: Optional[Mapping[str, Any]] = None
+    users: Iterable[Any], summary: Mapping[str, Any] | None = None
 ) -> str:
     """生成正确量排行榜文本"""
     users = list(users or [])
@@ -348,7 +355,7 @@ def parse_aliases(alias_str: str) -> dict[str, str]:
 
 # 解析 JSON 文本格式的别名映射配置。
 def parse_aliases_json_text(alias_text: str) -> dict[str, str]:
-    """Parse a JSON object alias config into alias -> canonical name mapping."""
+    """解析 JSON 格式的干员别名配置，返回别名到正式名称的映射。"""
     if not alias_text:
         return {}
 
@@ -375,7 +382,7 @@ def parse_aliases_json_text(alias_text: str) -> dict[str, str]:
 
 # 合并多份别名映射并让后者覆盖前者。
 def merge_alias_maps(*alias_maps: Mapping[str, str]) -> dict[str, str]:
-    """Merge multiple alias maps with later maps overriding earlier ones."""
+    """合并多份别名映射并让后者覆盖前者。"""
     merged: dict[str, str] = {}
     for alias_map in alias_maps:
         for alias, name in (alias_map or {}).items():
@@ -388,7 +395,15 @@ def merge_alias_maps(*alias_maps: Mapping[str, str]) -> dict[str, str]:
 # 将输入名称解析为正式干员名。
 def resolve_alias(name: str, alias_map: Mapping[str, str]) -> str:
     """将别名解析为正名（若不存在则返回原值）"""
-    return (alias_map or {}).get(name, name)
+    alias_map = alias_map or {}
+    if name in alias_map:
+        return alias_map[name]
+
+    normalized_name = str(name or "").casefold()
+    for alias, resolved_name in alias_map.items():
+        if str(alias or "").casefold() == normalized_name:
+            return resolved_name
+    return name
 
 
 # 从 JSON 文件加载按真名索引的干员别名表。
@@ -439,7 +454,11 @@ def is_exact_operator_alias_match(
     normalized_guess = guess.strip()
     if not normalized_name or not normalized_guess:
         return False
-    return normalized_guess in (aliases_by_name or {}).get(normalized_name, [])
+    normalized_guess_casefold = normalized_guess.casefold()
+    for alias in (aliases_by_name or {}).get(normalized_name, []):
+        if str(alias or "").strip().casefold() == normalized_guess_casefold:
+            return True
+    return False
 
 
 # 获取文本对应的无声调拼音串。
@@ -461,7 +480,16 @@ def check_daily_limit(user_id: str, daily_counter: dict, daily_limit: int) -> bo
     """检查并更新每日计数器，返回是否允许继续游戏"""
     if daily_limit < 0:
         return True
-    today = datetime.now().date()
+    today = str(datetime.now().date())
+    for counter_key in list(daily_counter):
+        try:
+            _, counter_date = str(counter_key).rsplit("_", 1)
+        except ValueError:
+            daily_counter.pop(counter_key, None)
+            continue
+        if counter_date != today:
+            daily_counter.pop(counter_key, None)
+
     key = f"{user_id}_{today}"
     count = daily_counter.get(key, 0)
     if count >= daily_limit:
@@ -475,6 +503,168 @@ def has_active_game(player: Mapping[str, Any], user_id: str) -> bool:
     """检查用户是否有活跃游戏"""
     data = (player or {}).get(user_id)
     return bool(data and data.get("status") == "active")
+
+
+# 安全取消异步任务。
+def safe_cancel_task(task: asyncio.Task | None) -> None:
+    if not task:
+        return
+    try:
+        if not task.done():
+            task.cancel()
+    except Exception:
+        pass
+
+
+# 解析 LLM 判题输出为布尔结果。
+def parse_llm_judge_result(completion_text: str) -> bool | None:
+    text = str(completion_text or "").strip()
+    if not text:
+        return None
+
+    tokens = re.findall(
+        r"(?<![A-Za-z])(?:true|false)(?![A-Za-z])",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if not tokens:
+        return None
+    token_values = {token.lower() for token in tokens}
+    if len(token_values) > 1:
+        return None
+    if "false" in token_values:
+        return False
+    return "true" in token_values
+
+
+# 转换为绝对路径。
+def get_absolute_path(path: str) -> str:
+    if not path:
+        raise ValueError("路径不能为空")
+    return os.path.abspath(path)
+
+
+# 从字节内容加载并校验图片。
+def load_image_from_bytes(content: bytes) -> Image.Image:
+    image = Image.open(BytesIO(content))
+    if image.format not in ["JPEG", "PNG", "GIF", "WEBP", "BMP"]:
+        raise Exception(f"不支持的图片格式: {image.format}")
+    image.load()
+
+    width, height = image.size
+    if width > 5000 or height > 5000:
+        raise Exception(f"图片尺寸过大: {width}x{height}")
+    return image
+
+
+# 提取并清理用户输入。
+def extract_and_sanitize_input(text: str, keyword: str) -> str:
+    if not text or not keyword:
+        return ""
+    pattern = rf"{re.escape(keyword)}\s*(.*)"
+    match = re.search(pattern, text)
+    if not match:
+        return ""
+    user_input = match.group(1).strip()
+    cleaned = re.sub(r"[^\u4e00-\u9fa5a-zA-Z0-9\s]", "", user_input)
+    if len(cleaned) > 50:
+        cleaned = cleaned[:50]
+    return cleaned
+
+
+# 生成随机方块遮罩图片。
+def mask_image_with_random_blocks(
+    image: Image.Image,
+    block_count: int = 5,
+    mask_color: tuple[int, int, int] = (0, 0, 0),
+    min_width_percent: int = 10,
+    max_width_percent: int = 20,
+    min_height_percent: int = 10,
+    max_height_percent: int = 20,
+    min_gap_percent: int = 2,
+    avoid_edges: bool = True,
+) -> tuple[Image.Image, list[tuple[int, int, int, int]]]:
+    if image.mode != "RGBA":
+        original_rgba = image.convert("RGBA")
+    else:
+        original_rgba = image.copy()
+
+    width, height = original_rgba.size
+    arr = np.array(original_rgba)
+
+    mask_layer = np.zeros_like(arr)
+    mask_layer[..., 0] = mask_color[0]
+    mask_layer[..., 1] = mask_color[1]
+    mask_layer[..., 2] = mask_color[2]
+    mask_layer[..., 3] = 255
+
+    min_width = max(5, int(width * min_width_percent / 100))
+    max_width = max(min_width, int(width * max_width_percent / 100))
+    min_height = max(5, int(height * min_height_percent / 100))
+    max_height = max(min_height, int(height * max_height_percent / 100))
+    min_gap = int(min(width, height) * min_gap_percent / 100)
+    edge_margin = min_gap if avoid_edges else 0
+
+    blocks: list[tuple[int, int, int, int]] = []
+
+    for _ in range(block_count):
+        for _attempt in range(100):
+            w = random.randint(min_width, max_width)
+            h = random.randint(min_height, max_height)
+            max_x = width - w - edge_margin
+            max_y = height - h - edge_margin
+            if max_x <= edge_margin or max_y <= edge_margin:
+                break
+
+            x1 = random.randint(edge_margin, max_x)
+            y1 = random.randint(edge_margin, max_y)
+            x2, y2 = x1 + w, y1 + h
+
+            conflict = False
+            for bx1, by1, bx2, by2 in blocks:
+                if not (
+                    x2 + min_gap < bx1
+                    or x1 > bx2 + min_gap
+                    or y2 + min_gap < by1
+                    or y1 > by2 + min_gap
+                ):
+                    conflict = True
+                    break
+
+            if not conflict:
+                blocks.append((x1, y1, x2, y2))
+                mask_layer[y1:y2, x1:x2, 3] = 0
+                break
+
+    alpha = mask_layer[..., 3:4] / 255.0
+    result_arr = arr * (1 - alpha) + mask_layer * alpha
+    result_arr = result_arr.astype(np.uint8)
+    result = Image.fromarray(result_arr, "RGBA")
+    return result, blocks
+
+
+# 按比例缩放图片并保持宽高比。
+def resize_to_target(image: Image.Image, target_size: int) -> Image.Image:
+    if target_size <= 0:
+        target_size = 800
+    w, h = image.size
+    if w >= h:
+        new_w = target_size
+        new_h = int(target_size * h / w)
+    else:
+        new_h = target_size
+        new_w = int(target_size * w / h)
+    new_w = max(new_w, 100)
+    new_h = max(new_h, 100)
+    return image.resize((new_w, new_h), Image.Resampling.LANCZOS)
+
+
+# 将 PIL 图片转换为字节。
+def pil_image_to_bytes(image: Image.Image, format: str = "PNG") -> bytes:
+    buf = BytesIO()
+    image.save(buf, format=format, optimize=True)
+    return buf.getvalue()
+
 
 # 清洗ffc消息,转变为指令
 def normalize_compact_fc_command(message_str: str) -> str | None:
