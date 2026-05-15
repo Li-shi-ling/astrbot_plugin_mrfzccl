@@ -1,3 +1,4 @@
 aiohttp
 pypinyin
 numpy
+html2image
