@@ -1,39 +1,39 @@
 ## 更新日志
 
 ### 2.0.0
-- 正式发布 2.0.0，整合 beta 阶段的 T2I 渲染链路、问答统计主题、LLM 兜底判题、非 `/fcc` 答案检测、低权重抽题概率和长期运行稳定性修复。
-- 网络 T2I 默认通过 AstrBot 原生 `html_render` 调用，服务地址由 AstrBot 系统配置维护，本地 `Html2Image` 仍作为回退路径。
-- 问答统计图片支持 `light`、`industrial`、`retro_win`、`snowcap_shop`、`constructivist_people` 等主题，并修复远程 T2I 截图白边和高度问题。
-- 完善插件配置提示、README、CHANGELOG 和打包流程，生成正式包 `astrbot_plugin_mrfzccl-v2.0.0.zip`。
+- ✅ 正式发布 2.0.0，整合 beta 阶段的 T2I 渲染链路、问答统计主题、LLM 兜底判题、非 `/fcc` 答案检测、低权重抽题概率和长期运行稳定性修复。
+- ✅ 网络 T2I 默认通过 AstrBot 原生 `html_render` 调用，服务地址由 AstrBot 系统配置维护，本地 `Html2Image` 仍作为回退路径。
+- ✅ 问答统计图片支持 `light`、`industrial`、`retro_win`、`snowcap_shop`、`constructivist_people` 等主题，并修复远程 T2I 截图白边和高度问题。
+- ✅ 完善插件配置提示、README、CHANGELOG 和打包流程，生成正式包 `astrbot_plugin_mrfzccl-v2.0.0.zip`。
 
 ### 2.0.0-beta.6
-- 根据第二轮代码审查修复图片下载重试参数的并发状态污染，并让 `timeout` 参数实际透传到下载请求。
-- 为每日答题计数增加旧日期懒清理，避免长期运行时 `daily_counter` 无界增长。
-- 增强插件卸载清理：取消比赛任务后清理房间锁、玩家状态、原图引用、HTTP session 和数据库引擎。
-- 降级保护 AstrBot 系统配置读取，移除未使用的 LLM prompt 包装方法和重复的最近干员状态。
-- 为比赛循环任务增加异常日志，避免后台任务失败只在事件循环告警中暴露。
+- ✅ 根据第二轮代码审查修复图片下载重试参数的并发状态污染，并让 `timeout` 参数实际透传到下载请求。
+- ✅ 为每日答题计数增加旧日期懒清理，避免长期运行时 `daily_counter` 无界增长。
+- ✅ 增强插件卸载清理：取消比赛任务后清理房间锁、玩家状态、原图引用、HTTP session 和数据库引擎。
+- ✅ 降级保护 AstrBot 系统配置读取，移除未使用的 LLM prompt 包装方法和重复的最近干员状态。
+- ✅ 为比赛循环任务增加异常日志，避免后台任务失败只在事件循环告警中暴露。
 
 ### 2.0.0-beta.5
-- 根据专项方案修复低权重干员概率计算，使 `low_weight_ratio` 表示单个低权重干员相对普通干员的抽中概率倍率
-- 安全获取 AstrBot `html_render`，避免运行环境未注入该属性时影响插件初始化
-- 数据库旧结构迁移改为先检查字段再补列，不再吞掉所有 `OperationalError`
-- 降低 `/fcw` 详细状态日志级别，并移除不必要的运行时模块注入
+- ✅ 根据专项方案修复低权重干员概率计算，使 `low_weight_ratio` 表示单个低权重干员相对普通干员的抽中概率倍率
+- ✅ 安全获取 AstrBot `html_render`，避免运行环境未注入该属性时影响插件初始化
+- ✅ 数据库旧结构迁移改为先检查字段再补列，不再吞掉所有 `OperationalError`
+- ✅ 降低 `/fcw` 详细状态日志级别，并移除不必要的运行时模块注入
 
 ### 2.0.0-beta.4
-- 新增 `constructivist_people` 问答统计图片主题，参考 `constructivist_people_we_theme` 的构成主义/People We 视觉原型
-- 主题素材迁移到 `assets/constructivist_people` 并做保守压缩，打包继续排除 `cs` 开发素材目录
+- ✅ 新增 `constructivist_people` 问答统计图片主题，参考 `constructivist_people_we_theme` 的构成主义/People We 视觉原型
+- ✅ 主题素材迁移到 `assets/constructivist_people` 并做保守压缩，打包继续排除 `cs` 开发素材目录
 
 ### 2.0.0-beta.3
-- 新增 `snowcap_shop` 问答统计图片主题，参考雪雉小店原型的配色、网格、票据边框和装饰素材
-- 主题素材放入 `assets/snowcap_shop` 并压缩大图，打包时不再包含开发用素材目录
+- ✅ 新增 `snowcap_shop` 问答统计图片主题，参考雪雉小店原型的配色、网格、票据边框和装饰素材
+- ✅ 主题素材放入 `assets/snowcap_shop` 并压缩大图，打包时不再包含开发用素材目录
 
 ### 2.0.0-beta.2
-- `/fcc` 和非 `/fcc` 普通答案检测均支持英文大小写不敏感匹配
-- 英文干员名、英文别名和普通消息中的英文答案包含检测都会忽略大小写
+- ✅ `/fcc` 和非 `/fcc` 普通答案检测均支持英文大小写不敏感匹配
+- ✅ 英文干员名、英文别名和普通消息中的英文答案包含检测都会忽略大小写
 
 ### 2.0.0-beta.1
-- 扩展普通消息答案检测：通过 @ 或唤醒词触发的消息也会参与非 `/fcc` 精确答案检测
-- 未命中正确答案时不回复、不拿房间锁，避免影响后续消息处理链路
+- ✅ 扩展普通消息答案检测：通过 @ 或唤醒词触发的消息也会参与非 `/fcc` 精确答案检测
+- ✅ 未命中正确答案时不回复、不拿房间锁，避免影响后续消息处理链路
 
 ### 2.0.0-beta
 - ✅ 发布 2.0.0 beta 版本
