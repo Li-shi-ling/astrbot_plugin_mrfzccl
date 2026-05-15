@@ -93,7 +93,7 @@ class QuestionPicker:
             is_low_weight.append(any(kw in name for kw in low_keywords))
 
         if not candidate_names:
-            logger.error("[extract_questions] 无可用题库（请检查 original_url 配置）")
+            logger.error("[Mrfzccl][extract_questions] 无可用题库（请检查 original_url 配置）")
             return False
 
         self._candidate_names = np.array(candidate_names, dtype=object)
@@ -108,7 +108,7 @@ class QuestionPicker:
     def pick(self) -> Optional[dict[str, Any]]:
         try:
             if not self.data:
-                logger.error("[extract_questions] 数据未加载")
+                logger.error("[Mrfzccl][extract_questions] 数据未加载")
                 return None
             if not self._ensure_cache() or self._candidate_names is None:
                 return None
@@ -153,9 +153,9 @@ class QuestionPicker:
 
             return {"name": random_name, "url": random_url, "fctn": 0}
         except (KeyError, IndexError, TypeError) as exc:
-            logger.error(f"[extract_questions] 提取题目失败: {exc}")
+            logger.error(f"[Mrfzccl][extract_questions] 提取题目失败: {exc}")
             return None
         except Exception as exc:
-            logger.error(f"[extract_questions] 提取题目时发生未知错误: {exc}")
-            logger.error(traceback.format_exc())
+            logger.error(f"[Mrfzccl][extract_questions] 提取题目时发生未知错误: {exc}")
+            logger.debug(f"[Mrfzccl][extract_questions] {traceback.format_exc()}")
             return None

@@ -141,8 +141,8 @@ async def handle_fc(
                     ]
                 )
         except Exception as e:
-            logger.error(f"[fc] 命令执行失败: {e}")
-            logger.error(traceback.format_exc())
+            logger.error(f"[Mrfzccl][fc] 命令执行失败: {e}")
+            logger.debug(f"[Mrfzccl][fc] {traceback.format_exc()}")
             response = event.plain_result("游戏初始化失败，请稍后重试")
 
     return response
@@ -167,7 +167,7 @@ async def handle_fcc(
     )
 
     logger.debug(
-        f"[fcc] 用户ID={user_id}, 当前房间键={list(self.player.keys())}, 是否有激活游戏={has_active_game(self.player, user_id)}"
+        f"[Mrfzccl][fcc] 用户ID={user_id}, 当前房间键={list(self.player.keys())}, 是否有激活游戏={has_active_game(self.player, user_id)}"
     )
 
     # 检查是否有活跃比赛
@@ -237,7 +237,7 @@ async def handle_fcc(
         )
 
     logger.debug(
-        f"[答题判断] 正确答案: {correct_name}, 用户回答: {guess_text}, 解析后: {resolved_guess}, 别名精确匹配: {exact_alias_match}, 相似度: {similarity:.2f}, "
+        f"[Mrfzccl][答题判断] 正确答案: {correct_name}, 用户回答: {guess_text}, 解析后: {resolved_guess}, 别名精确匹配: {exact_alias_match}, 相似度: {similarity:.2f}, "
         f"字匹配率: {calculate:.2f}, 同音匹配: {homophone_match}, LLM 判题: {llm_match_correct}, 阈值: {self.similarity_threshold}/{self.calculate_threshold}, "
         f"结果: {is_correct}"
     )
@@ -259,7 +259,7 @@ async def handle_fcc(
                 safe_cancel_task(self.match_next_task.pop(group_id, None))
         elif previous_answer_matched:
             logger.debug(
-                f"[fcc] 忽略上一题宽限期内的迟到正确答案，群ID={group_id}，发送者ID={sender_id}，回答={resolved_guess}"
+                f"[Mrfzccl][fcc] 忽略上一题宽限期内的迟到正确答案，群ID={group_id}，发送者ID={sender_id}，回答={resolved_guess}"
             )
         else:
             await self.match_repo.increment_participant_wrong(
@@ -502,7 +502,7 @@ async def handle_fcw(
         char_data = self.data.get(self.player[user_id]["name"], {})
 
         logger.debug(
-            f"[fcw] user={user_id} fctn={self.player[user_id].get('fctn')}, "
+            f"[Mrfzccl][fcw] user={user_id} fctn={self.player[user_id].get('fctn')}, "
             f"char_data keys={list(char_data.keys()) if char_data else 'None'}"
         )
 

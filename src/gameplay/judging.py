@@ -193,7 +193,7 @@ class LlmJudgeService:
 
         provider = self.context.get_provider_by_id(self.provider_id)
         if not isinstance(provider, Provider):
-            logger.warning(f"[llm_judge] 未找到 Provider: {self.provider_id}")
+            logger.warning(f"[Mrfzccl][llm_judge] 未找到 Provider: {self.provider_id}")
             return False
 
         prompt = self.build_prompt(answer, guess)
@@ -215,10 +215,10 @@ class LlmJudgeService:
                 return result
             except Exception as exc:
                 if attempt >= max_attempts:
-                    logger.warning(f"[llm_judge] 判题失败: {exc}")
+                    logger.warning(f"[Mrfzccl][llm_judge] 判题失败: {exc}")
                     return False
-                logger.warning(
-                    f"[llm_judge] 判题失败，准备重试({attempt}/{max_attempts}): {exc}"
+                logger.debug(
+                    f"[Mrfzccl][llm_judge] 判题失败，准备重试({attempt}/{max_attempts}): {exc}"
                 )
                 if self.retry_interval_seconds > 0:
                     await asyncio.sleep(self.retry_interval_seconds)

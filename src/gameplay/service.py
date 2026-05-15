@@ -39,14 +39,14 @@ class GuessGameService:
         try:
             question = self.question_picker.pick()
             if not question:
-                logger.error("[fc_init] 提取题目失败")
+                logger.error("[Mrfzccl][fc_init] 提取题目失败")
                 self.game_runtime.end_game(user_id)
                 return None
 
             try:
                 image = await self.image_downloader.get_image_from_url(question["url"])
             except Exception as exc:
-                logger.error(f"[fc_init] 获取图片失败,e:{exc}")
+                logger.error(f"[Mrfzccl][fc_init] 获取图片失败,e:{exc}")
                 self.game_runtime.end_game(user_id)
                 return None
 
@@ -61,8 +61,8 @@ class GuessGameService:
             )
             return pil_image_to_bytes(resized)
         except Exception as exc:
-            logger.error(f"[fc_init] 初始化失败: {exc}")
-            logger.error(traceback.format_exc())
+            logger.error(f"[Mrfzccl][fc_init] 初始化失败: {exc}")
+            logger.debug(f"[Mrfzccl][fc_init] {traceback.format_exc()}")
             self.game_runtime.end_game(user_id)
             return None
 
@@ -76,7 +76,7 @@ class GuessGameService:
 
     async def send_original_image(self, user_id: str, event: Any) -> Any:
         if user_id not in self.game_runtime.original_images:
-            logger.warning(f"[send_original_image] 用户 {user_id} 没有原始图片")
+            logger.warning(f"[Mrfzccl][send_original_image] 用户 {user_id} 没有原始图片")
             return event.plain_result("无法获取正确答案图片")
 
         try:
@@ -92,6 +92,6 @@ class GuessGameService:
             self.game_runtime.end_game(user_id)
             return output_data
         except Exception as exc:
-            logger.error(f"[send_original_image] 发送原始图片失败: {exc}")
+            logger.error(f"[Mrfzccl][send_original_image] 发送原始图片失败: {exc}")
             self.game_runtime.end_game(user_id)
             return event.plain_result("发送正确答案图片失败")

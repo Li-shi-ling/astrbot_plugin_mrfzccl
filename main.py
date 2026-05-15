@@ -133,7 +133,7 @@ class Mrfzccl(Star):
         configured_llm_judge_max_retries = int(llm_judge.get("max_retries", 0) or 0)
         if configured_llm_judge_max_retries > LLM_JUDGE_MAX_RETRIES_HARD_LIMIT:
             logger.warning(
-                "[llm_judge] max_retries=%s exceeds hard limit %s, clamping",
+                "[Mrfzccl][llm_judge] max_retries=%s exceeds hard limit %s, clamping",
                 configured_llm_judge_max_retries,
                 LLM_JUDGE_MAX_RETRIES_HARD_LIMIT,
             )
@@ -295,16 +295,16 @@ class Mrfzccl(Star):
                 logger.error("[Mrfzccl] 数据文件格式错误: 应为字典类型")
                 return
             self.is_load = True
-            logger.info(f"[Mrfzccl] 数据加载成功，共加载 {len(self.data)} 个角色")
+            logger.debug(f"[Mrfzccl] 数据加载成功，共加载 {len(self.data)} 个角色")
         except json.JSONDecodeError as exc:
             logger.error(f"[Mrfzccl] JSON解析错误: {exc}")
-            logger.error(traceback.format_exc())
+            logger.debug(f"[Mrfzccl] {traceback.format_exc()}")
         except (FileNotFoundError, PermissionError, OSError) as exc:
             logger.error(f"[Mrfzccl] 文件未找到或权限错误: {exc}")
-            logger.error(traceback.format_exc())
+            logger.debug(f"[Mrfzccl] {traceback.format_exc()}")
         except Exception as exc:
             logger.error(f"[Mrfzccl] 加载数据文件时发生未知错误: {exc}")
-            logger.error(traceback.format_exc())
+            logger.debug(f"[Mrfzccl] {traceback.format_exc()}")
         self.question_picker = QuestionPicker(
             self.data if getattr(self, "is_load", False) else {},
             low_weight_keywords=self.low_weight_keywords,
@@ -899,11 +899,11 @@ class Mrfzccl(Star):
         except asyncio.CancelledError:
             return
         except Exception as err:
-            logger.warning(f"[match] failed to inspect loop task: {err}")
+            logger.warning(f"[Mrfzccl][match] failed to inspect loop task: {err}")
             return
         if exc is not None:
             logger.error(
-                f"[match] loop task failed, group_id={group_id}",
+                f"[Mrfzccl][match] loop task failed, group_id={group_id}",
                 exc_info=(type(exc), exc, exc.__traceback__),
             )
 

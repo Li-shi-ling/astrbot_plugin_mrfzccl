@@ -143,7 +143,7 @@ class MatchService:
         except asyncio.CancelledError:
             return
         except Exception as exc:
-            logger.warning(f"[match] 自动提示任务异常 group_id={group_id}: {exc}")
+            logger.warning(f"[Mrfzccl][match] 自动提示任务异常 group_id={group_id}: {exc}")
 
     async def send_match_leaderboard_to_session(
         self, session: str, match_name: str, top_participants: list, title: str
@@ -163,15 +163,15 @@ class MatchService:
                     )
                     return
                 except Exception as exc:
-                    logger.warning(f"[match] 主动发送排行榜图片失败，回退文本: {exc}")
+                    logger.warning(f"[Mrfzccl][match] 主动发送排行榜图片失败，回退文本: {exc}")
         except Exception as exc:
-            logger.warning(f"[match] 比赛排行榜图片发送失败，回退文本: {exc}")
+            logger.warning(f"[Mrfzccl][match] 比赛排行榜图片发送失败，回退文本: {exc}")
 
         text = generate_match_leaderboard_text(match_name, top_participants, ended=True)
         try:
             await self.context.send_message(session, MessageChain().message(text))
         except Exception as exc:
-            logger.warning(f"[match] 主动发送排行榜文本失败: {exc}")
+            logger.warning(f"[Mrfzccl][match] 主动发送排行榜文本失败: {exc}")
 
     async def match_game_loop(self, group_id: str) -> None:
         await asyncio.sleep(2)
@@ -200,7 +200,7 @@ class MatchService:
                 )
                 if not session:
                     logger.warning(
-                        f"[match] 缺少 session，无法主动发送比赛结束消息 group_id={group_id}"
+                        f"[Mrfzccl][match] 缺少 session，无法主动发送比赛结束消息 group_id={group_id}"
                     )
                     return
 
@@ -214,6 +214,6 @@ class MatchService:
                 )
             except Exception as exc:
                 logger.warning(
-                    f"[match] 主动发送比赛结束消息失败 group_id={group_id}: {exc}"
+                    f"[Mrfzccl][match] 主动发送比赛结束消息失败 group_id={group_id}: {exc}"
                 )
             return

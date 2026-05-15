@@ -890,8 +890,8 @@ class BaseRenderer(ABC):
 
             from astrbot.api import logger as _logger
 
-            _logger.error(f"[渲染] HTML 转图片失败: filename={filename}")
-            _logger.error(_tb.format_exc())
+            _logger.error(f"[Mrfzccl][渲染] HTML 转图片失败: filename={filename}")
+            _logger.debug(f"[Mrfzccl][渲染] {_tb.format_exc()}")
             raise
 
     async def _render_html_to_image(
@@ -901,8 +901,8 @@ class BaseRenderer(ABC):
 
         if self.t2i_enabled and self._html_render_func is not None:
             try:
-                _logger.info(
-                    "[渲染] 图片生成尝试 T2I: filename=%s size=%sx%s",
+                _logger.debug(
+                    "[Mrfzccl][渲染] 图片生成尝试 T2I: filename=%s size=%sx%s",
                     filename,
                     width,
                     height,
@@ -913,13 +913,13 @@ class BaseRenderer(ABC):
                     raise
 
                 _logger.warning(
-                    "[渲染] T2I 渲染失败，回退到本地 Html2Image: filename=%s",
+                    "[Mrfzccl][渲染] T2I 渲染失败，回退到本地 Html2Image: filename=%s",
                     filename,
                     exc_info=True,
                 )
         else:
-            _logger.info(
-                "[渲染] 图片生成使用本地 Html2Image: filename=%s reason=%s",
+            _logger.debug(
+                "[Mrfzccl][渲染] 图片生成使用本地 Html2Image: filename=%s reason=%s",
                 filename,
                 "t2i_disabled" if not self.t2i_enabled else "html_render_missing",
             )
@@ -983,8 +983,8 @@ class BaseRenderer(ABC):
 
         from astrbot.api import logger as _logger
 
-        _logger.info(
-            "[渲染] 本地 Html2Image 完成: filename=%s path=%s", filename, out_path
+        _logger.debug(
+            "[Mrfzccl][渲染] 本地 Html2Image 完成: filename=%s path=%s", filename, out_path
         )
         return str(out_path)
 
@@ -1007,8 +1007,8 @@ class BaseRenderer(ABC):
                 try:
                     result = await self._html_render_func(t2i_html, {}, False, options)
                     path = self._write_t2i_result(result, filename)
-                    _logger.info(
-                        "[渲染] T2I 渲染完成: filename=%s strategy=%s type=%s result=%s path=%s",
+                    _logger.debug(
+                        "[Mrfzccl][渲染] T2I 渲染完成: filename=%s strategy=%s type=%s result=%s path=%s",
                         filename,
                         index,
                         options.get("type"),
@@ -1019,7 +1019,7 @@ class BaseRenderer(ABC):
                 except Exception as exc:
                     last_error = exc
                     _logger.warning(
-                        "[渲染] T2I 策略失败: filename=%s strategy=%s options=%s",
+                        "[Mrfzccl][渲染] T2I 策略失败: filename=%s strategy=%s options=%s",
                         filename,
                         index,
                         options,
@@ -1094,8 +1094,8 @@ class BaseRenderer(ABC):
                 source = image.convert("RGBA")
                 bbox = self._t2i_content_bbox(source)
                 if bbox is None:
-                    _logger.info(
-                        "[渲染] T2I 结果无需裁剪: filename=%s path=%s size=%sx%s reason=no_border",
+                    _logger.debug(
+                        "[Mrfzccl][渲染] T2I 结果无需裁剪: filename=%s path=%s size=%sx%s reason=no_border",
                         filename,
                         image_path,
                         source.width,
@@ -1105,8 +1105,8 @@ class BaseRenderer(ABC):
 
                 full_bbox = (0, 0, source.width, source.height)
                 if bbox == full_bbox:
-                    _logger.info(
-                        "[渲染] T2I 结果无需裁剪: filename=%s path=%s size=%sx%s reason=full_content",
+                    _logger.debug(
+                        "[Mrfzccl][渲染] T2I 结果无需裁剪: filename=%s path=%s size=%sx%s reason=full_content",
                         filename,
                         image_path,
                         source.width,
@@ -1117,8 +1117,8 @@ class BaseRenderer(ABC):
                 cropped = self._trim_t2i_trailing_light_edges(source.crop(bbox))
                 out_path = self.output_dir / f"{filename}.png"
                 cropped.save(out_path)
-                _logger.info(
-                    "[渲染] T2I 结果裁剪白边: filename=%s source=%s original=%sx%s cropped=%sx%s path=%s",
+                _logger.debug(
+                    "[Mrfzccl][渲染] T2I 结果裁剪白边: filename=%s source=%s original=%sx%s cropped=%sx%s path=%s",
                     filename,
                     image_path,
                     source.width,
@@ -1130,7 +1130,7 @@ class BaseRenderer(ABC):
                 return str(out_path)
         except (OSError, UnidentifiedImageError):
             _logger.warning(
-                "[渲染] T2I 结果白边裁剪跳过: filename=%s path=%s reason=image_open_failed",
+                "[Mrfzccl][渲染] T2I 结果白边裁剪跳过: filename=%s path=%s reason=image_open_failed",
                 filename,
                 image_path,
                 exc_info=True,
