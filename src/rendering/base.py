@@ -55,9 +55,11 @@ class BaseRenderer(ABC):
         self._t2i_semaphore = asyncio.Semaphore(max(1, int(t2i_max_concurrent or 1)))
         self._html_render_func = html_render_func
 
-        if not HTML2IMAGE_AVAILABLE and not self.t2i_enabled:
+        if not HTML2IMAGE_AVAILABLE and (
+            not self.t2i_enabled or self._html_render_func is None
+        ):
             raise ImportError(
-                "Html2Image包未安装，且未启用 T2I 服务。请安装：pip install html2image 或启用 T2I 配置"
+                "Html2Image包未安装，且当前无法使用 AstrBot html_render。请安装：pip install html2image 或启用可用的 T2I 服务"
             )
 
         self._avatar_concurrency = 8
