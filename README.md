@@ -2,7 +2,7 @@
 
 AstrBot 插件：遮挡干员立绘猜名字，支持单局游戏、排行榜、用户名片和群比赛模式。
 
-当前版本：`2.0.0-beta.4`
+当前版本：`2.0.0-beta.5`
 
 ## 功能概览
 
@@ -101,7 +101,7 @@ AstrBot 插件：遮挡干员立绘猜名字，支持单局游戏、排行榜、
 | `medium_probability` | 中等难度概率，默认 `0.3` |
 | `hard_probability` | 困难难度概率，默认 `0.1` |
 | `low_weight_characters` | 低权重干员关键词，逗号分隔 |
-| `low_weight_ratio` | 低权重干员出现概率缩放比例 |
+| `low_weight_ratio` | 单个低权重干员相对普通干员的抽中概率倍率，例如 `0.2` 约为普通干员的 20% |
 
 ### 判题
 
@@ -182,7 +182,7 @@ dist/astrbot_plugin_mrfzccl-<version>.zip
 当前版本打包产物示例：
 
 ```text
-dist/astrbot_plugin_mrfzccl-v2.0.0-beta.4.zip
+dist/astrbot_plugin_mrfzccl-v2.0.0-beta.5.zip
 ```
 
 ## 数据来源

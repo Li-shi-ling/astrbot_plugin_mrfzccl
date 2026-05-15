@@ -2,13 +2,10 @@ from astrbot.api.event import MessageChain, filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
 import astrbot.api.message_components as Comp
 from astrbot.api import AstrBotConfig, logger
-from astrbot.api.provider import Provider
 from astrbot.api.star import StarTools
 from astrbot.core.utils.astrbot_path import get_astrbot_temp_path
 from astrbot.api.event.filter import EventMessageType
 
-from .src.gameplay import judging as judging_module
-from .src.images import service as media_module
 from .src.core.config import LLM_JUDGE_MAX_RETRIES_HARD_LIMIT, load_settings
 from .src.gameplay.service import GuessGameService
 from .src.gameplay.judging import (
@@ -64,7 +61,7 @@ import re
 
 
 # 注册插件，指定插件名、作者、描述和版本号
-@register("mrfzccl", "Lishining", "你知道的,我一直是明日方舟高手", "2.0.0-beta.4")
+@register("mrfzccl", "Lishining", "你知道的,我一直是明日方舟高手", "2.0.0-beta.5")
 class Mrfzccl(Star):
     _question_candidate_names: np.ndarray
     _question_candidate_urls: List[List[str]]
@@ -284,7 +281,7 @@ class Mrfzccl(Star):
             output_dir=str(self.img_tmp_path),
             t2i_enabled=t2i_config.enabled,
             t2i_max_concurrent=t2i_config.max_concurrent,
-            html_render_func=self.html_render,
+            html_render_func=getattr(self, "html_render", None),
         )
         logger.info(f"[Mrfzccl] 渲染主题: {renderer_theme}")
 
@@ -866,8 +863,6 @@ class Mrfzccl(Star):
         *,
         unified_msg_origin: str | None = None,
     ) -> bool:
-        judging_module.Provider = Provider
-        judging_module.asyncio = asyncio
         self.llm_judge_service.context = self.context
         return await self.llm_judge_service.judge_answer(
             answer, guess, unified_msg_origin=unified_msg_origin
@@ -882,7 +877,6 @@ class Mrfzccl(Star):
     async def get_image_from_url(
         self, url: str, timeout: int = 10
     ) -> Optional[Image.Image]:
-        media_module.asyncio = asyncio
         self.image_downloader.max_retries = self.image_download_max_retries
         self.image_downloader.retry_interval_seconds = (
             self.image_download_retry_interval_seconds

@@ -39,6 +39,7 @@ def get_answer_match_details(
     similarity = SequenceMatcher(None, normalized_answer, normalized_guess).ratio()
     coverage = calculate_char_coverage_set(normalized_answer, normalized_guess)
     exact_match = normalized_answer == normalized_guess
+    # Text comparisons ignore English case; homophone matching keeps raw text for pinyin.
     homophone_match = check_homophone(
         answer, guess, enable_homophone=settings.enable_homophone
     )

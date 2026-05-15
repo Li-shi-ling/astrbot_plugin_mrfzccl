@@ -1,5 +1,11 @@
 ## 更新日志
 
+### 2.0.0-beta.5
+- 根据专项方案修复低权重干员概率计算，使 `low_weight_ratio` 表示单个低权重干员相对普通干员的抽中概率倍率
+- 安全获取 AstrBot `html_render`，避免运行环境未注入该属性时影响插件初始化
+- 数据库旧结构迁移改为先检查字段再补列，不再吞掉所有 `OperationalError`
+- 降低 `/fcw` 详细状态日志级别，并移除不必要的运行时模块注入
+
 ### 2.0.0-beta.4
 - 新增 `constructivist_people` 问答统计图片主题，参考 `constructivist_people_we_theme` 的构成主义/People We 视觉原型
 - 主题素材迁移到 `assets/constructivist_people` 并做保守压缩，打包继续排除 `cs` 开发素材目录

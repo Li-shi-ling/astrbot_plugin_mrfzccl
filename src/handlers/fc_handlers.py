@@ -501,8 +501,9 @@ async def handle_fcw(
     else:
         char_data = self.data.get(self.player[user_id]["name"], {})
 
-        logger.info(
-            f"[fcw] player={self.player[user_id]}, char_data keys={list(char_data.keys()) if char_data else 'None'}"
+        logger.debug(
+            f"[fcw] user={user_id} fctn={self.player[user_id].get('fctn')}, "
+            f"char_data keys={list(char_data.keys()) if char_data else 'None'}"
         )
 
         # 获取职业及分支

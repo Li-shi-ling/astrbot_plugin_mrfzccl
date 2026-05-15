@@ -4,7 +4,6 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from sqlalchemy import text
-from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 
@@ -130,58 +129,23 @@ class DBManager:
             for ddl in self._CREATE_INDEX_SQL:
                 await conn.execute(ddl)
 
-        # 以下为旧版本数据库的增量迁移（ALTER TABLE），新库会静默跳过
+        # 以下为旧版本数据库的增量迁移（ALTER TABLE），新库会跳过已有字段。
         async with self.engine.begin() as conn:
-            try:
-                await conn.execute(
-                    text(
-                        "ALTER TABLE match ADD COLUMN question_limit INTEGER DEFAULT 0"
-                    )
-                )
-            except OperationalError:
-                pass
-            try:
-                await conn.execute(
-                    text("ALTER TABLE match ADD COLUMN time_limit INTEGER DEFAULT 0")
-                )
-            except OperationalError:
-                pass
-            try:
-                await conn.execute(
-                    text("ALTER TABLE match ADD COLUMN started_at TIMESTAMP")
-                )
-            except OperationalError:
-                pass
-            try:
-                await conn.execute(
-                    text(
-                        "ALTER TABLE match_participant ADD COLUMN wrong_count INTEGER DEFAULT 0"
-                    )
-                )
-            except OperationalError:
-                pass
-            try:
-                await conn.execute(
-                    text(
-                        "ALTER TABLE match_participant ADD COLUMN score REAL DEFAULT 0.0"
-                    )
-                )
-            except OperationalError:
-                pass
-            try:
-                await conn.execute(
-                    text(
-                        "ALTER TABLE match_honor ADD COLUMN wrong_count INTEGER DEFAULT 0"
-                    )
-                )
-            except OperationalError:
-                pass
-            try:
-                await conn.execute(
-                    text("ALTER TABLE match_honor ADD COLUMN score REAL DEFAULT 0.0")
-                )
-            except OperationalError:
-                pass
+            await self._ensure_column(
+                conn, "match", "question_limit", "INTEGER DEFAULT 0"
+            )
+            await self._ensure_column(conn, "match", "time_limit", "INTEGER DEFAULT 0")
+            await self._ensure_column(conn, "match", "started_at", "TIMESTAMP")
+            await self._ensure_column(
+                conn, "match_participant", "wrong_count", "INTEGER DEFAULT 0"
+            )
+            await self._ensure_column(
+                conn, "match_participant", "score", "REAL DEFAULT 0.0"
+            )
+            await self._ensure_column(
+                conn, "match_honor", "wrong_count", "INTEGER DEFAULT 0"
+            )
+            await self._ensure_column(conn, "match_honor", "score", "REAL DEFAULT 0.0")
 
         # SQLite 优化 PRAGMA
         async with self.engine.connect() as conn:
@@ -194,6 +158,19 @@ class DBManager:
             await conn.commit()
 
         await self.validate_db()
+
+    async def _ensure_column(
+        self, conn, table_name: str, column_name: str, column_sql: str
+    ) -> None:
+        pragma_result = await conn.execute(text(f'PRAGMA table_info("{table_name}")'))
+        existing_columns = {
+            str(row[1]) for row in pragma_result.fetchall() if len(row) > 1
+        }
+        if column_name in existing_columns:
+            return
+        await conn.execute(
+            text(f'ALTER TABLE "{table_name}" ADD COLUMN "{column_name}" {column_sql}')
+        )
 
     async def validate_db(self):
         """校验数据库表和字段是否完整"""

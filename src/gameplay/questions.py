@@ -62,7 +62,9 @@ class QuestionPicker:
 
     def _ensure_cache(self) -> bool:
         data_id = id(self.data)
-        kw_sig = tuple(kw for kw in self.low_weight_keywords if isinstance(kw, str) and kw)
+        kw_sig = tuple(
+            kw for kw in self.low_weight_keywords if isinstance(kw, str) and kw
+        )
         if (
             self._cache_data_id == data_id
             and self._cache_kw_sig == kw_sig
@@ -113,55 +115,33 @@ class QuestionPicker:
 
             names_arr = self._candidate_names
             recent_set = set(self.recent_characters or [])
-            if len(recent_set) >= len(names_arr):
-                self.recent_characters = []
-                recent_set = set()
 
-            available_count = max(1, len(names_arr) - len(recent_set))
             try:
-                low_prob = float(self.low_weight_ratio) / float(available_count)
+                low_ratio = float(self.low_weight_ratio)
             except Exception:
-                low_prob = 0.0
-            low_prob = max(0.0, min(1.0, low_prob))
+                low_ratio = 0.0
+            low_ratio = max(0.0, float(low_ratio))
 
-            use_low = (
-                self._low_idx.size > 0
-                and self._normal_idx.size > 0
-                and self.rng.random() < low_prob
-            )
-            primary_pool = (
-                self._low_idx
-                if use_low
-                else (self._normal_idx if self._normal_idx.size > 0 else self._low_idx)
-            )
-            secondary_pool = self._normal_idx if primary_pool is self._low_idx else self._low_idx
-            if primary_pool.size == 0:
-                primary_pool = np.arange(len(names_arr), dtype=int)
-                secondary_pool = np.array([], dtype=int)
+            weights = np.ones(len(names_arr), dtype=float)
+            if self._low_idx.size > 0 and low_ratio != 1.0:
+                weights[self._low_idx] = low_ratio
 
-            def pick_index(pool_arr: np.ndarray) -> Optional[int]:
-                if pool_arr.size == 0:
-                    return None
-                for _ in range(60):
-                    idx = int(pool_arr[int(self.rng.integers(pool_arr.size))])
-                    if str(names_arr[idx]) not in recent_set:
-                        return idx
-                for idx in pool_arr:
-                    candidate_idx = int(idx)
-                    if str(names_arr[candidate_idx]) not in recent_set:
-                        return candidate_idx
-                return None
+            if recent_set:
+                recent_mask = np.array(
+                    [str(name) in recent_set for name in names_arr], dtype=bool
+                )
+                weights[recent_mask] = 0.0
 
-            picked = pick_index(primary_pool)
-            if picked is None:
-                picked = pick_index(secondary_pool)
-            if picked is None:
+            total_weight = float(weights.sum())
+            if total_weight <= 0:
                 self.recent_characters = []
-                picked = pick_index(primary_pool)
-                if picked is None:
-                    picked = pick_index(secondary_pool)
-                if picked is None:
-                    picked = int(self.rng.integers(len(names_arr)))
+                weights = np.ones(len(names_arr), dtype=float)
+                if self._low_idx.size > 0 and low_ratio != 1.0:
+                    weights[self._low_idx] = low_ratio
+                total_weight = float(weights.sum())
+
+            probs = weights / total_weight
+            picked = int(self.rng.choice(len(names_arr), p=probs))
 
             random_name = str(names_arr[picked])
             url_list = self._candidate_urls[picked]

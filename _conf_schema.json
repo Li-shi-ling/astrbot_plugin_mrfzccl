@@ -118,7 +118,7 @@
     "description": "低权重干员出现概率(0-1)",
     "type": "float",
     "default": 0.2,
-    "hint": "0.2表示降低该干员出现概率为原本的0.2"
+    "hint": "0.2 表示单个低权重干员的抽中概率约为普通干员的 20%"
   },
   "character_aliases": {
     "description": "干员别名映射(别名:正名,多组用逗号分隔)",
