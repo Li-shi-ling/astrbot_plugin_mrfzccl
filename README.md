@@ -2,7 +2,7 @@
 
 AstrBot 插件：遮挡干员立绘猜名字，支持单局游戏、排行榜、用户名片和群比赛模式。
 
-当前版本：`2.0.0-beta.6`
+当前版本：`2.0.0`
 
 ## 功能概览
 
@@ -182,7 +182,7 @@ dist/astrbot_plugin_mrfzccl-<version>.zip
 当前版本打包产物示例：
 
 ```text
-dist/astrbot_plugin_mrfzccl-v2.0.0-beta.6.zip
+dist/astrbot_plugin_mrfzccl-v2.0.0.zip
 ```
 
 ## 数据来源

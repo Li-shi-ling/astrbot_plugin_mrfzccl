@@ -1,5 +1,11 @@
 ## 更新日志
 
+### 2.0.0
+- 正式发布 2.0.0，整合 beta 阶段的 T2I 渲染链路、问答统计主题、LLM 兜底判题、非 `/fcc` 答案检测、低权重抽题概率和长期运行稳定性修复。
+- 网络 T2I 默认通过 AstrBot 原生 `html_render` 调用，服务地址由 AstrBot 系统配置维护，本地 `Html2Image` 仍作为回退路径。
+- 问答统计图片支持 `light`、`industrial`、`retro_win`、`snowcap_shop`、`constructivist_people` 等主题，并修复远程 T2I 截图白边和高度问题。
+- 完善插件配置提示、README、CHANGELOG 和打包流程，生成正式包 `astrbot_plugin_mrfzccl-v2.0.0.zip`。
+
 ### 2.0.0-beta.6
 - 根据第二轮代码审查修复图片下载重试参数的并发状态污染，并让 `timeout` 参数实际透传到下载请求。
 - 为每日答题计数增加旧日期懒清理，避免长期运行时 `daily_counter` 无界增长。

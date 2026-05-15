@@ -139,6 +139,9 @@ class QuestionPicker:
                 if self._low_idx.size > 0 and low_ratio != 1.0:
                     weights[self._low_idx] = low_ratio
                 total_weight = float(weights.sum())
+                if total_weight <= 0:
+                    weights = np.ones(len(names_arr), dtype=float)
+                    total_weight = float(weights.sum())
 
             probs = weights / total_weight
             picked = int(self.rng.choice(len(names_arr), p=probs))

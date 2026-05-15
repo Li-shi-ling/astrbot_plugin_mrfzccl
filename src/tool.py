@@ -529,9 +529,12 @@ def parse_llm_judge_result(completion_text: str) -> bool | None:
     )
     if not tokens:
         return None
-    if any(token.lower() == "false" for token in tokens):
+    token_values = {token.lower() for token in tokens}
+    if len(token_values) > 1:
+        return None
+    if "false" in token_values:
         return False
-    return any(token.lower() == "true" for token in tokens)
+    return "true" in token_values
 
 
 # 转换为绝对路径。
