@@ -37,7 +37,7 @@ class ConstructivistPeopleRenderer(BaseRenderer):
     def _top_bar_html(self) -> str:
         return """
         <div class="peoplewe-topbar">
-          <span class="peoplewe-brand">Arknights Design // PEOPLE, WE</span>
+          <span class="peoplewe-brand">PEOPLE, WE</span>
           <span class="peoplewe-status">QNA RECORD BOARD_</span>
         </div>
         """
