@@ -37,7 +37,6 @@ from .src.tool import (
     pil_image_to_bytes,
     normalize_compact_fc_command,
     resize_to_target,
-    safe_cancel_task,
 )
 from .src.db.repo import UserQnARepo, MatchRepo
 from .src.db.database import DBManager
@@ -61,7 +60,7 @@ import re
 
 
 # 注册插件，指定插件名、作者、描述和版本号
-@register("mrfzccl", "Lishining", "你知道的,我一直是明日方舟高手", "2.0.0-beta.5")
+@register("mrfzccl", "Lishining", "你知道的,我一直是明日方舟高手", "2.0.0-beta.6")
 class Mrfzccl(Star):
     _question_candidate_names: np.ndarray
     _question_candidate_urls: List[List[str]]
@@ -70,16 +69,15 @@ class Mrfzccl(Star):
     _question_cache_data_id: Optional[int]
     _question_cache_kw_sig: Optional[tuple]
     _question_rng: np.random.Generator
-    recent_characters: List[str]
 
     # 插件初始化方法
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context, config)  # 调用父类初始化
         self.plugin_dir = Path(__file__).resolve().parent
         self.context = context
-        self.settings = load_settings(
-            config, self.plugin_dir, self._get_context_config()
-        )
+        get_context_config = getattr(self, "_get_context_config", None)
+        system_config = get_context_config() if callable(get_context_config) else None
+        self.settings = load_settings(config, self.plugin_dir, system_config)
         self.game_runtime = GameRuntime()
         self.match_runtime = MatchRuntime(self.game_runtime)
         self.Config = config  # 保存配置对象
@@ -198,7 +196,6 @@ class Mrfzccl(Star):
         self.match_runtime.lock_last_used = self._room_lock_last_used
 
         # 防重复配置
-        self.recent_characters: list = []  # 最近出现的干员列表
         self.max_recent_count = 20  # 最大记录数量
 
         # 别名系统
@@ -654,9 +651,13 @@ class Mrfzccl(Star):
         yield ccl_match.build_match_start_response(event, result)
 
         # 创建比赛循环任务，用于检查结束条件
-        self.match_loop_task[group_id] = asyncio.create_task(
-            self._match_game_loop(group_id)
+        task = asyncio.create_task(self._match_game_loop(group_id))
+        task.add_done_callback(
+            lambda done_task, gid=group_id: self._log_match_task_failure(
+                gid, done_task
+            )
         )
+        self.match_loop_task[group_id] = task
 
     # 结束比赛命令
     @ccl.command("比赛结束")
@@ -853,9 +854,6 @@ class Mrfzccl(Star):
             alias_settings.operator_aliases_path
         )
 
-    def _build_llm_judge_prompt(self, answer: str, guess: str) -> str:
-        return self.llm_judge_service.build_prompt(answer, guess)
-
     async def judge_answer_with_llm(
         self,
         answer: str,
@@ -877,11 +875,12 @@ class Mrfzccl(Star):
     async def get_image_from_url(
         self, url: str, timeout: int = 10
     ) -> Optional[Image.Image]:
-        self.image_downloader.max_retries = self.image_download_max_retries
-        self.image_downloader.retry_interval_seconds = (
-            self.image_download_retry_interval_seconds
+        return await self.image_downloader.get_image_from_url(
+            url,
+            timeout=timeout,
+            max_retries=self.image_download_max_retries,
+            retry_interval_seconds=self.image_download_retry_interval_seconds,
         )
-        return await self.image_downloader.get_image_from_url(url)
 
     async def _send_match_leaderboard_to_session(
         self,
@@ -893,6 +892,20 @@ class Mrfzccl(Star):
         await self.match_service.send_match_leaderboard_to_session(
             session, match_name, top_participants, title
         )
+
+    def _log_match_task_failure(self, group_id: str, task: asyncio.Task) -> None:
+        try:
+            exc = task.exception()
+        except asyncio.CancelledError:
+            return
+        except Exception as err:
+            logger.warning(f"[match] failed to inspect loop task: {err}")
+            return
+        if exc is not None:
+            logger.error(
+                f"[match] loop task failed, group_id={group_id}",
+                exc_info=(type(exc), exc, exc.__traceback__),
+            )
 
     async def _match_game_loop(self, group_id: str):
         await self.match_service.match_game_loop(group_id)
@@ -907,10 +920,27 @@ class Mrfzccl(Star):
         self._shutting_down = True
         # 取消比赛相关任务（防止卸载后仍在后台发送消息）
         self.match_runtime.cancel_all_match_tasks()
+        self.match_locks.clear()
+        self._room_lock_last_used.clear()
+
+        for image in list(self.original_images.values()):
+            try:
+                image.close()
+            except Exception as exc:
+                logger.debug(f"[Mrfzccl] failed to close original image: {exc}")
+        self.original_images.clear()
+        self.player.clear()
 
         if self._session and not self._session.closed:
             await self._session.close()
             logger.debug("[Mrfzccl] HTTP session closed")
+
+        engine = getattr(getattr(self, "db", None), "engine", None)
+        if engine is not None:
+            result = engine.dispose()
+            if hasattr(result, "__await__"):
+                await result
+            logger.debug("[Mrfzccl] database engine disposed")
 
     # 获取或创建 HTTP 会话
     async def _get_session(self) -> aiohttp.ClientSession:

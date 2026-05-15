@@ -139,15 +139,36 @@ class ImageDownloader:
         self.max_retries = max(0, int(max_retries or 0))
         self.retry_interval_seconds = max(0.0, float(retry_interval_seconds or 0.0))
 
-    async def get_image_from_url(self, url: str) -> Image.Image:
+    async def get_image_from_url(
+        self,
+        url: str,
+        *,
+        timeout: int | float | None = None,
+        max_retries: int | None = None,
+        retry_interval_seconds: float | None = None,
+    ) -> Image.Image:
         validate_public_image_url(url)
 
-        max_attempts = max(1, self.max_retries + 1)
+        effective_max_retries = (
+            self.max_retries if max_retries is None else max(0, int(max_retries or 0))
+        )
+        effective_retry_interval = (
+            self.retry_interval_seconds
+            if retry_interval_seconds is None
+            else max(0.0, float(retry_interval_seconds or 0.0))
+        )
+        request_kwargs: dict[str, object] = {"ssl": False}
+        if timeout is not None:
+            request_kwargs["timeout"] = aiohttp.ClientTimeout(
+                total=max(0.1, float(timeout))
+            )
+
+        max_attempts = max(1, effective_max_retries + 1)
         last_error: Exception | None = None
         for attempt in range(1, max_attempts + 1):
             try:
                 session = await self.session_provider()
-                async with session.get(url, ssl=False) as response:
+                async with session.get(url, **request_kwargs) as response:
                     if response.status != 200:
                         raise Exception(f"HTTP {response.status}: {response.reason}")
                     content = await response.read()
@@ -163,8 +184,8 @@ class ImageDownloader:
                 last_error = exc
                 if attempt >= max_attempts:
                     break
-                if self.retry_interval_seconds > 0:
-                    await asyncio.sleep(self.retry_interval_seconds)
+                if effective_retry_interval > 0:
+                    await asyncio.sleep(effective_retry_interval)
 
         if last_error is not None:
             raise last_error

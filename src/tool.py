@@ -480,7 +480,16 @@ def check_daily_limit(user_id: str, daily_counter: dict, daily_limit: int) -> bo
     """检查并更新每日计数器，返回是否允许继续游戏"""
     if daily_limit < 0:
         return True
-    today = datetime.now().date()
+    today = str(datetime.now().date())
+    for counter_key in list(daily_counter):
+        try:
+            _, counter_date = str(counter_key).rsplit("_", 1)
+        except ValueError:
+            daily_counter.pop(counter_key, None)
+            continue
+        if counter_date != today:
+            daily_counter.pop(counter_key, None)
+
     key = f"{user_id}_{today}"
     count = daily_counter.get(key, 0)
     if count >= daily_limit:
