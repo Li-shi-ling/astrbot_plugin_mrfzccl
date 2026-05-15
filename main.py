@@ -508,6 +508,7 @@ class Mrfzccl(Star):
 
     @filter.event_message_type(EventMessageType.ALL)
     async def other_fcc(self, event: AstrMessageEvent):
+        """非fcc消息监听"""
         if not getattr(self, "enable_other_message_exact_match", True):
             return
 
