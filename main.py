@@ -25,36 +25,25 @@ from .src.rendering import (
 )
 from .src.core.runtime import GameRuntime, MatchRuntime
 from .src.tool import (
-    generate_match_leaderboard_text,
     has_active_game,
     load_operator_aliases,
-    load_image_from_bytes,
-    mask_image_with_random_blocks,
     merge_alias_maps,
-    parse_llm_judge_result,
     parse_aliases,
     parse_aliases_json_text,
-    pil_image_to_bytes,
     normalize_compact_fc_command,
-    resize_to_target,
 )
 from .src.db.repo import UserQnARepo, MatchRepo
 from .src.db.database import DBManager
 from .src.handlers import ccl_admin, ccl_leaderboard, ccl_match, fc_handlers
 
 from typing import Optional, Dict, Any, List
-from datetime import datetime, timedelta
-from urllib.parse import urlparse
 from pathlib import Path
 from PIL import Image
 import numpy as np
 import traceback
-import ipaddress
 import asyncio
 import aiohttp
-import random
 import json
-import time
 import os
 import re
 
