@@ -156,7 +156,7 @@
       "prompt": {
         "description": "模型提示词",
         "type": "text",
-        "default": "你是明日方舟猜题判题器。已知标准答案：{answer}。用户回答：{guess}。请只判断用户回答是否可以视为该标准答案。只能输出 True 或 False，不要输出其他任何内容。",
+        "default": "判断以下别名是否属于《明日方舟》中人物“{answer}”的，并使用True或False作答，不输出额外内容：{guess}",
         "hint": "支持 {answer} 和 {guess} 占位符，默认约束模型只输出 True 或 False",
         "editor_mode": true,
         "editor_language": "text",

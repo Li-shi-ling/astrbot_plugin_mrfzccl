@@ -7,8 +7,7 @@ from typing import Any
 
 LLM_JUDGE_MAX_RETRIES_HARD_LIMIT = 5
 DEFAULT_LLM_JUDGE_PROMPT = (
-    "你是明日方舟猜题判题器。已知标准答案：{answer}。用户回答：{guess}。"
-    "请只判断用户回答是否可以视为该标准答案。只能输出 True 或 False，不要输出其他任何内容。"
+    "判断以下别名是否属于《明日方舟》中人物“{answer}”的，并使用True或False作答，不输出额外内容：{guess}"
 )
 
 
