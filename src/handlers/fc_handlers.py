@@ -19,6 +19,7 @@ from ..gameplay.judging import (
 )
 from ..tool import (
     check_daily_limit,
+    extract_compact_guess_from_event,
     generate_image_or_fallback,
     generate_match_leaderboard_text,
     has_active_game,
@@ -369,7 +370,7 @@ async def handle_other_fcc(
     is_group: bool,
     group_id: str | None,
 ) -> tuple[list[Any], tuple[str, list] | None]:
-    """游戏进行中，纯文本精确命中答案的核心逻辑。"""
+    """游戏进行中，纯文本精确命中答案/紧凑指令写法的核心逻辑。"""
     if not has_active_game(self.player, user_id):
         return [], None
 
@@ -381,9 +382,14 @@ async def handle_other_fcc(
     if not isinstance(player_state, dict):
         return [], None
 
-    correct_name = str(player_state.get("name", "") or "")
-    if not correct_name or correct_name.casefold() not in raw_message.casefold():
-        return [], None
+    # 指令被重命名或配置别名后，「无空格紧凑写法」（如「猜史尔特尔」）无法被
+    # 静态正则过滤器感知，这里按实际生效的指令名兜底解析并交给完整判题流程
+    guess_text = extract_compact_guess_from_event(self, event, "fcc")
+    if guess_text is None:
+        correct_name = str(player_state.get("name", "") or "")
+        if not correct_name or correct_name.casefold() not in raw_message.casefold():
+            return [], None
+        guess_text = correct_name
 
     return await handle_fcc(
         self,
@@ -392,7 +398,7 @@ async def handle_other_fcc(
         sender_id=sender_id,
         is_group=is_group,
         group_id=group_id,
-        guess_text_override=correct_name,
+        guess_text_override=guess_text,
     )
 
 

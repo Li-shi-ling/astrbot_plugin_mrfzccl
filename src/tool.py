@@ -646,10 +646,17 @@ def extract_argument_after_command(
     message = re.sub(r"\s+", " ", str(message_str or "").strip())
     if not message:
         return None
+    # 部分平台/场景下唤醒前缀（如 "/"）可能残留在 message_str 中，这里一并兼容
+    candidates = [message]
+    stripped = message.lstrip("/\\").lstrip()
+    if stripped and stripped != message:
+        candidates.append(stripped)
     # 长名称优先，避免短别名先把长指令名匹配掉
-    for name in sorted(dedupe_command_names(command_names), key=len, reverse=True):
-        if message.startswith(name):
-            return message[len(name) :].lstrip()
+    names = sorted(dedupe_command_names(command_names), key=len, reverse=True)
+    for candidate in candidates:
+        for name in names:
+            if candidate.startswith(name):
+                return candidate[len(name) :].lstrip()
     return None
 
 
@@ -675,6 +682,26 @@ def extract_guess_text_from_event(
     return sanitize_guess_text(raw_argument)
 
 
+# 解析紧凑写法的猜测内容（如 fcc史尔特尔 / 别名史尔特尔），非紧凑形式返回 None。
+def extract_compact_guess_from_event(
+    plugin: Any,
+    event: AstrMessageEvent,
+    handler_name: str = "fcc",
+    *,
+    fallback: str = "fcc",
+) -> str | None:
+    """按指令实际生效的名称解析「无空格紧凑写法」的猜测内容。
+
+    静态正则过滤器无法感知面板里配置的别名/重命名，这类消息不会被
+    fcregex 捕获；此函数供纯文本监听兜底调用，命中则返回清洗后的猜测。
+    """
+    message = str(getattr(event, "message_str", "") or "")
+    names = resolve_command_names(plugin, handler_name, fallback=fallback)
+    if normalize_compact_fc_command(message, names) is None:
+        return None
+    return extract_guess_text_from_event(plugin, event, handler_name, fallback=fallback)
+
+
 # 判断本次事件是否已被插件自己的指定 handler 命中。
 def is_plugin_handler_activated(
     event: AstrMessageEvent,
@@ -690,12 +717,18 @@ def is_plugin_handler_activated(
     if not targets:
         return False
     try:
+        plugin_module = getattr(type(plugin), "__module__", "") if plugin else ""
         for md in event.get_extra("activated_handlers", []) or []:
             if getattr(md, "handler_name", "") not in targets:
                 continue
             owner = _handler_owner(getattr(md, "handler", None))
-            if owner is not None and plugin is not None and owner is not plugin:
-                # 同名 handler 属于其它插件，忽略
+            module_path = getattr(md, "handler_module_path", "")
+            if owner is not None:
+                if plugin is not None and owner is not plugin:
+                    # 同名 handler 属于其它插件，忽略
+                    continue
+            elif plugin_module and module_path != plugin_module:
+                # handler 未绑定实例（无法判定归属）时退化为按模块判定
                 continue
             return True
     except Exception as exc:

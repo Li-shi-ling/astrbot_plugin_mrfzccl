@@ -31,6 +31,7 @@ from .src.tool import (
     merge_alias_maps,
     parse_aliases,
     parse_aliases_json_text,
+    resolve_command_names,
     normalize_compact_fc_command,
 )
 from .src.db.repo import UserQnARepo, MatchRepo
@@ -494,8 +495,9 @@ class Mrfzccl(Star):
         if not getattr(event, "is_at_or_wake_command", False):
             return
 
-        # 清理指令
-        normalized = normalize_compact_fc_command(event.message_str)
+        # 清理指令：按实际生效的指令名归一化，兼容重命名与别名
+        names = resolve_command_names(self, "fcc", fallback="fcc")
+        normalized = normalize_compact_fc_command(event.message_str, names)
         if not normalized:
             return
 
@@ -534,12 +536,9 @@ class Mrfzccl(Star):
         if not has_active_game(self.player, user_id):
             return
 
-        player_state = self.player.get(user_id)
-        if not isinstance(player_state, dict):
-            return
-
-        correct_name = str(player_state.get("name", "") or "")
-        if not correct_name or correct_name.casefold() not in raw_message.casefold():
+        # 是否命中答案 / 是否为紧凑指令写法，统一交给 handle_other_fcc 判断
+        # （指令被重命名或配置别名后，紧凑写法只能在这里兜底识别）
+        if not isinstance(self.player.get(user_id), dict):
             return
 
         room_lock = self._get_match_lock(user_id)
