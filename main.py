@@ -512,33 +512,58 @@ class Mrfzccl(Star):
     @filter.event_message_type(EventMessageType.ALL)
     async def other_fcc(self, event: AstrMessageEvent):
         """非fcc消息监听"""
-        if not getattr(self, "enable_other_message_exact_match", True):
-            return
-
         # 指令名可能在面板里被重命名或配置了别名，此时消息文本不以 "fcc"
         # 开头，需要按实际命中的 handler 判断，避免和 /fcc 指令重复判题。
         if is_plugin_handler_activated(event, self, ("fcc", "fcregex")):
             return
 
         raw_message = str(event.message_str or "")
-        message = re.sub(r"\s+", " ", raw_message.strip())
-        if should_skip_plain_answer_message(
-            message, is_wake_command=getattr(event, "is_at_or_wake_command", False)
-        ):
-            return
-
         group_id_raw = event.get_group_id()
         sender_id = str(event.get_sender_id())
         is_group = bool(group_id_raw)
         group_id = str(group_id_raw) if is_group else None
         user_id = group_id if is_group else sender_id
 
+        # 紧凑指令写法（如重命名/别名后的「猜史尔特尔」）无法被静态正则过滤器
+        # 感知，这里按实际生效的指令名兜底识别。它属于「指令用法」，因此要求
+        # 唤醒（@ 或唤醒前缀）、且不受下方纯文本匹配开关影响；命中后复用
+        # /fcc 处理流程，保证锁与排行榜等语义一致。
+        if getattr(event, "is_at_or_wake_command", False) and has_active_game(
+            self.player, user_id
+        ):
+            normalized = normalize_compact_fc_command(
+                raw_message, resolve_command_names(self, "fcc", fallback="fcc")
+            )
+            if normalized:
+                original_message = event.message_str
+                event.message_str = normalized
+                try:
+                    async for result in self.fcc(event):
+                        yield result
+                finally:
+                    event.message_str = original_message
+                return
+
+        if not getattr(self, "enable_other_message_exact_match", True):
+            return
+
+        message = re.sub(r"\s+", " ", raw_message.strip())
+        if should_skip_plain_answer_message(
+            message, is_wake_command=getattr(event, "is_at_or_wake_command", False)
+        ):
+            return
+
         if not has_active_game(self.player, user_id):
             return
 
-        # 是否命中答案 / 是否为紧凑指令写法，统一交给 handle_other_fcc 判断
-        # （指令被重命名或配置别名后，紧凑写法只能在这里兜底识别）
-        if not isinstance(self.player.get(user_id), dict):
+        # 锁前先按当前答案快照过滤：避免普通消息无谓抢占房间锁，也避免排队期间
+        # 题目已切换后被误判为下一题的答案。
+        player_state = self.player.get(user_id)
+        if not isinstance(player_state, dict):
+            return
+
+        correct_name = str(player_state.get("name", "") or "")
+        if not correct_name or correct_name.casefold() not in raw_message.casefold():
             return
 
         room_lock = self._get_match_lock(user_id)

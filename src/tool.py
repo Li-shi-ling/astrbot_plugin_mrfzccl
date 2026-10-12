@@ -683,26 +683,6 @@ def extract_guess_text_from_event(
     return sanitize_guess_text(raw_argument)
 
 
-# 解析紧凑写法的猜测内容（如 fcc史尔特尔 / 别名史尔特尔），非紧凑形式返回 None。
-def extract_compact_guess_from_event(
-    plugin: Any,
-    event: AstrMessageEvent,
-    handler_name: str = "fcc",
-    *,
-    fallback: str = "fcc",
-) -> str | None:
-    """按指令实际生效的名称解析「无空格紧凑写法」的猜测内容。
-
-    静态正则过滤器无法感知面板里配置的别名/重命名，这类消息不会被
-    fcregex 捕获；此函数供纯文本监听兜底调用，命中则返回清洗后的猜测。
-    """
-    message = str(getattr(event, "message_str", "") or "")
-    names = resolve_command_names(plugin, handler_name, fallback=fallback)
-    if normalize_compact_fc_command(message, names) is None:
-        return None
-    return extract_guess_text_from_event(plugin, event, handler_name, fallback=fallback)
-
-
 # 判断本次事件是否已被插件自己的指定 handler 命中。
 def is_plugin_handler_activated(
     event: AstrMessageEvent,
