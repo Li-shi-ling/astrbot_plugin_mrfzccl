@@ -503,7 +503,8 @@ def check_daily_limit(user_id: str, daily_counter: dict, daily_limit: int) -> bo
 def has_active_game(player: Mapping[str, Any], user_id: str) -> bool:
     """检查用户是否有活跃游戏"""
     data = (player or {}).get(user_id)
-    return bool(data and data.get("status") == "active")
+    # 防御非映射的脏数据，避免 data.get 抛 AttributeError 中断流程
+    return bool(isinstance(data, Mapping) and data.get("status") == "active")
 
 
 # 安全取消异步任务。
