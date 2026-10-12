@@ -26,6 +26,7 @@ from .src.rendering import (
 from .src.core.runtime import GameRuntime, MatchRuntime
 from .src.tool import (
     has_active_game,
+    is_plugin_handler_activated,
     load_operator_aliases,
     merge_alias_maps,
     parse_aliases,
@@ -510,6 +511,11 @@ class Mrfzccl(Star):
     async def other_fcc(self, event: AstrMessageEvent):
         """非fcc消息监听"""
         if not getattr(self, "enable_other_message_exact_match", True):
+            return
+
+        # 指令名可能在面板里被重命名或配置了别名，此时消息文本不以 "fcc"
+        # 开头，需要按实际命中的 handler 判断，避免和 /fcc 指令重复判题。
+        if is_plugin_handler_activated(event, self, ("fcc", "fcregex")):
             return
 
         raw_message = str(event.message_str or "")

@@ -1,4 +1,5 @@
 import asyncio
+import functools
 import json
 import os
 import random
@@ -557,19 +558,149 @@ def load_image_from_bytes(content: bytes) -> Image.Image:
     return image
 
 
+# 清洗用户输入的猜测文本（去除标点等无关字符并限制长度）。
+def sanitize_guess_text(text: str) -> str:
+    cleaned = re.sub(r"[^\u4e00-\u9fa5a-zA-Z0-9\s]", "", str(text or "").strip())
+    if len(cleaned) > 50:
+        cleaned = cleaned[:50]
+    return cleaned
+
+
 # 提取并清理用户输入。
 def extract_and_sanitize_input(text: str, keyword: str) -> str:
     if not text or not keyword:
         return ""
     pattern = rf"{re.escape(keyword)}\s*(.*)"
-    match = re.search(pattern, text)
+    match = re.search(pattern, str(text))
     if not match:
         return ""
-    user_input = match.group(1).strip()
-    cleaned = re.sub(r"[^\u4e00-\u9fa5a-zA-Z0-9\s]", "", user_input)
-    if len(cleaned) > 50:
-        cleaned = cleaned[:50]
-    return cleaned
+    return sanitize_guess_text(match.group(1))
+
+
+# 去重并保持顺序，过滤掉空白名称。
+def dedupe_command_names(names: Iterable[str] | None) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for name in names or []:
+        text = str(name or "").strip()
+        if text and text not in seen:
+            seen.add(text)
+            result.append(text)
+    return result
+
+
+# 取出 handler 绑定的插件实例（AstrBot 用 functools.partial 绑定 self）。
+def _handler_owner(handler: Any) -> Any:
+    if isinstance(handler, functools.partial):
+        return handler.args[0] if handler.args else None
+    return getattr(handler, "__self__", None)
+
+
+# 读取指令在 AstrBot 中实际生效的全部名称（含面板重命名与别名）。
+def resolve_command_names(
+    plugin: Any,
+    handler_name: str,
+    *,
+    fallback: str | None = None,
+) -> list[str]:
+    """获取某个指令 handler 在 AstrBot 中生效的所有名称。
+
+    AstrBot 支持在 WebUI 里重命名指令或配置别名（记录在 CommandFilter 上），
+    此时用户发送的 message_str 里是别名文本，写死原始指令名会解析不到参数。
+    这里直接读取运行时注册表中该 handler 的 CommandFilter，拿到最新指令名。
+    """
+    names: list[str] = [fallback] if fallback else []
+    try:
+        from astrbot.core.star.filter.command import CommandFilter
+        from astrbot.core.star.star_handler import star_handlers_registry
+    except Exception as exc:  # 防御 AstrBot 内部结构变化
+        logger.debug(f"[Mrfzccl] 导入指令过滤器失败, 回退默认名称: {exc}")
+        return dedupe_command_names(names)
+
+    try:
+        plugin_module = getattr(type(plugin), "__module__", "") if plugin else ""
+        for md in list(star_handlers_registry.star_handlers_map.values()):
+            if getattr(md, "handler_name", "") != handler_name:
+                continue
+            owner = _handler_owner(getattr(md, "handler", None))
+            module_path = getattr(md, "handler_module_path", "")
+            if owner is not None:
+                if plugin is not None and owner is not plugin:
+                    continue
+            elif plugin_module and module_path != plugin_module:
+                continue
+            for flt in getattr(md, "event_filters", None) or []:
+                if isinstance(flt, CommandFilter):
+                    names.extend(flt.get_complete_command_names())
+    except Exception as exc:
+        logger.debug(f"[Mrfzccl] 解析指令名称失败, 回退默认名称: {exc}")
+    return dedupe_command_names(names)
+
+
+# 去掉文本开头的指令名，返回其后的参数原文。
+def extract_argument_after_command(
+    message_str: str,
+    command_names: Iterable[str] | None,
+) -> str | None:
+    """若文本以某个指令名开头，返回去掉指令名后的参数文本（未清洗）。"""
+    message = re.sub(r"\s+", " ", str(message_str or "").strip())
+    if not message:
+        return None
+    # 长名称优先，避免短别名先把长指令名匹配掉
+    for name in sorted(dedupe_command_names(command_names), key=len, reverse=True):
+        if message.startswith(name):
+            return message[len(name) :].lstrip()
+    return None
+
+
+# 从事件消息中提取 /fcc 后面的猜测内容（兼容指令重命名与别名）。
+def extract_guess_text_from_event(
+    plugin: Any,
+    event: AstrMessageEvent,
+    handler_name: str = "fcc",
+    *,
+    fallback: str = "fcc",
+) -> str:
+    """按指令在 AstrBot 中实际生效的名称解析消息，取出并清洗猜测内容。
+
+    不能写死原始指令名：面板里把 fcc 重命名或加了别名后，message_str 里
+    是别名文本，写死 "fcc" 会解析不到参数导致判题失败。
+    """
+    message = str(getattr(event, "message_str", "") or "")
+    names = resolve_command_names(plugin, handler_name, fallback=fallback)
+    raw_argument = extract_argument_after_command(message, names)
+    if raw_argument is None:
+        # 兜底：按原始指令名做宽松匹配，保持与旧版本一致的行为
+        return extract_and_sanitize_input(message, fallback)
+    return sanitize_guess_text(raw_argument)
+
+
+# 判断本次事件是否已被插件自己的指定 handler 命中。
+def is_plugin_handler_activated(
+    event: AstrMessageEvent,
+    plugin: Any,
+    handler_names: Iterable[str],
+) -> bool:
+    """本次事件是否命中 plugin 自己的某个 handler（按 handler 方法名判断）。
+
+    用于让纯文本答案监听器跳过已被指令处理的消息，避免同一条消息
+    既被 /fcc 指令判题、又被普通消息监听重复判题。
+    """
+    targets = {str(name).strip() for name in handler_names if str(name).strip()}
+    if not targets:
+        return False
+    try:
+        for md in event.get_extra("activated_handlers", []) or []:
+            if getattr(md, "handler_name", "") not in targets:
+                continue
+            owner = _handler_owner(getattr(md, "handler", None))
+            if owner is not None and plugin is not None and owner is not plugin:
+                # 同名 handler 属于其它插件，忽略
+                continue
+            return True
+    except Exception as exc:
+        logger.debug(f"[Mrfzccl] 判断 handler 激活状态失败: {exc}")
+    return False
 
 
 # 生成随机方块遮罩图片。
@@ -667,20 +798,27 @@ def pil_image_to_bytes(image: Image.Image, format: str = "PNG") -> bytes:
 
 
 # 清洗ffc消息,转变为指令
-def normalize_compact_fc_command(message_str: str) -> str | None:
+def normalize_compact_fc_command(
+    message_str: str,
+    command_names: Iterable[str] | None = None,
+) -> str | None:
     message = re.sub(r"\s+", " ", (message_str or "").strip())
     if not message:
         return None
 
-    match = re.fullmatch(r"(fcc)(\S+)", message)
-    if not match:
-        return None
+    # 默认兼容原始 "fcc"，传入实际生效的指令名后同样支持别名与重命名
+    names = dedupe_command_names(command_names) or ["fcc"]
+    for name in sorted(names, key=len, reverse=True):
+        match = re.fullmatch(rf"{re.escape(name)}(\S+)", message)
+        if not match:
+            continue
 
-    command, argument = match.groups()
-    if len(argument) > 16:
-        return None
+        argument = match.group(1)
+        if len(argument) > 16:
+            continue
 
-    if re.search(r"[，。！？、,.!?/\\\\]", argument):
-        return None
+        if re.search(r"[，。！？、,.!?/\\\\]", argument):
+            continue
 
-    return f"{command} {argument}"
+        return f"{name} {argument}"
+    return None
