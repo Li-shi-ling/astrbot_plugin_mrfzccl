@@ -718,7 +718,7 @@ def is_plugin_handler_activated(
         return False
     try:
         plugin_module = getattr(type(plugin), "__module__", "") if plugin else ""
-        for md in event.get_extra("activated_handlers", []) or []:
+        for md in event.get_extra("activated_handlers") or []:
             if getattr(md, "handler_name", "") not in targets:
                 continue
             owner = _handler_owner(getattr(md, "handler", None))
