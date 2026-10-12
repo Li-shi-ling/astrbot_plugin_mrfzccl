@@ -7864,7 +7864,8 @@
   "烈夏": {
     "original_url": [
       "https://patchwiki.biligame.com/images/arknights/c/cc/qs88e9nf5szgx1sz1ulchol545fz5am.png",
-      "https://patchwiki.biligame.com/images/arknights/a/a4/044g5c0mqhfkn7uuqddv4l5yi016ln7.png"
+      "https://patchwiki.biligame.com/images/arknights/a/a4/044g5c0mqhfkn7uuqddv4l5yi016ln7.png",
+      "https://patchwiki.biligame.com/images/arknights/7/71/2r4x0b8wpmr5jity5wrm50yropcdlvm.png"
     ],
     "thumbnail_url": "https://patchwiki.biligame.com/images/arknights/thumb/c/cc/qs88e9nf5szgx1sz1ulchol545fz5am.png/100px-Pack_%E7%83%88%E5%A4%8F_skin_0_0.png",
     "alt_text": "Pack 烈夏 skin 0 0.png",
@@ -9069,7 +9070,8 @@
   "空构": {
     "original_url": [
       "https://patchwiki.biligame.com/images/arknights/9/9e/et0elpei6b6pas0z7qpo48rq3ukvzyd.png",
-      "https://patchwiki.biligame.com/images/arknights/f/fa/ijih3bo0nlbx2ndl1xscz8svdpoq77j.png"
+      "https://patchwiki.biligame.com/images/arknights/f/fa/ijih3bo0nlbx2ndl1xscz8svdpoq77j.png",
+      "https://patchwiki.biligame.com/images/arknights/9/97/d4jq6vc0n2i3xji5wyygh6fpln8506f.png"
     ],
     "thumbnail_url": "https://patchwiki.biligame.com/images/arknights/thumb/9/9e/et0elpei6b6pas0z7qpo48rq3ukvzyd.png/100px-Pack_%E7%A9%BA%E6%9E%84_skin_0_0.png",
     "alt_text": "Pack 空构 skin 0 0.png",
@@ -12562,7 +12564,7 @@
     "初始攻击": "236",
     "初始防御": "197",
     "初始法抗": "0",
-    "再部署": "80",
+    "再部署": "70",
     "部署费用": "14（最终16）",
     "阻挡数": "2→2→2",
     "攻击间隔": "1.5",
@@ -14539,5 +14541,97 @@
     "thumbnail_url": "https://patchwiki.biligame.com/images/arknights/thumb/d/d5/qk3zuryrme1dahc7zt1kw1vc63px8jh.png/100px-Pack_%E7%90%A6%E8%89%AF_skin_1.png",
     "alt_text": "Pack 琦良 skin 1.png",
     "source_link": "/arknights/%E6%96%87%E4%BB%B6:Pack_%E7%90%A6%E8%89%AF_skin_1.png"
+  },
+  "克莱门莎": {
+    "original_url": [
+      "https://patchwiki.biligame.com/images/arknights/1/10/62lv96bn0bailfawittydl95r7wtv53.png",
+      "https://patchwiki.biligame.com/images/arknights/c/c3/6ftm83dc4yta8ffxapd95vvce6al7pa.png"
+    ],
+    "thumbnail_url": "https://patchwiki.biligame.com/images/arknights/thumb/1/10/62lv96bn0bailfawittydl95r7wtv53.png/100px-Pack_%E5%85%8B%E8%8E%B1%E9%97%A8%E8%8E%8E_skin_0_0.png",
+    "alt_text": "Pack 克莱门莎 skin 0 0.png",
+    "source_link": "/arknights/%E6%96%87%E4%BB%B6:Pack_%E5%85%8B%E8%8E%B1%E9%97%A8%E8%8E%8E_skin_0_0.png",
+    "星级": "6",
+    "职业分支": "近卫 - 本源近卫",
+    "性别": "女",
+    "阵营": "阿戈尔",
+    "获取途径": "标准寻访",
+    "标签": [
+      "近战位",
+      "输出",
+      "爆发"
+    ],
+    "初始生命": "1116",
+    "初始攻击": "410",
+    "初始防御": "178",
+    "初始法抗": "10",
+    "再部署": "70",
+    "部署费用": "19（最终21）",
+    "阻挡数": "2→2→2",
+    "攻击间隔": "1.2",
+    "是否感染": "否",
+    "职业": "近卫",
+    "分支": "本源近卫"
+  },
+  "德·托莱多": {
+    "original_url": [
+      "https://patchwiki.biligame.com/images/arknights/a/ac/gpp8r0tmo8hds85nnoty4ohs9ff3jjn.png",
+      "https://patchwiki.biligame.com/images/arknights/8/81/80vg7ul16kynvce4s8epsqc06qkanvj.png"
+    ],
+    "thumbnail_url": "https://patchwiki.biligame.com/images/arknights/thumb/a/ac/gpp8r0tmo8hds85nnoty4ohs9ff3jjn.png/100px-Pack_%E5%BE%B7%C2%B7%E6%89%98%E8%8E%B1%E5%A4%9A_skin_0_0.png",
+    "alt_text": "Pack 德·托莱多 skin 0 0.png",
+    "source_link": "/arknights/%E6%96%87%E4%BB%B6:Pack_%E5%BE%B7%C2%B7%E6%89%98%E8%8E%B1%E5%A4%9A_skin_0_0.png",
+    "星级": "5",
+    "职业分支": "辅助 - 削弱者",
+    "性别": "女",
+    "阵营": "伊比利亚",
+    "获取途径": "标准寻访",
+    "标签": [
+      "远程位",
+      "削弱"
+    ],
+    "初始生命": "609",
+    "初始攻击": "196",
+    "初始防御": "51",
+    "初始法抗": "15",
+    "再部署": "70",
+    "部署费用": "10（最终10）",
+    "阻挡数": "1→1→1",
+    "攻击间隔": "1.6",
+    "是否感染": "否",
+    "职业": "辅助",
+    "分支": "削弱者"
+  },
+  "旅骨": {
+    "original_url": [
+      "https://patchwiki.biligame.com/images/arknights/9/94/3bdnl41n0fwlqm9knce0xqfz8lou13v.png",
+      "https://patchwiki.biligame.com/images/arknights/b/b1/o12h18znemm79dfjwrjthce5buvwi13.png"
+    ],
+    "thumbnail_url": "https://patchwiki.biligame.com/images/arknights/thumb/9/94/3bdnl41n0fwlqm9knce0xqfz8lou13v.png/100px-Pack_%E6%97%85%E9%AA%A8_skin_0_0.png",
+    "alt_text": "Pack 旅骨 skin 0 0.png",
+    "source_link": "/arknights/%E6%96%87%E4%BB%B6:Pack_%E6%97%85%E9%AA%A8_skin_0_0.png",
+    "星级": "5",
+    "职业分支": "特种 - 炼金师",
+    "性别": "男",
+    "阵营": "伊比利亚",
+    "获取途径": [
+      "活动获取",
+      "【昨日海】活动获取"
+    ],
+    "标签": [
+      "远程位",
+      "削弱",
+      "减速"
+    ],
+    "初始生命": "521",
+    "初始攻击": "203",
+    "初始防御": "44",
+    "初始法抗": "20",
+    "再部署": "80",
+    "部署费用": "15（最终16）",
+    "阻挡数": "1→1→1",
+    "攻击间隔": "1.5",
+    "是否感染": "否",
+    "职业": "特种",
+    "分支": "炼金师"
   }
 }
