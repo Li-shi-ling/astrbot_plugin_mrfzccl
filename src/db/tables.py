@@ -1,6 +1,10 @@
 from datetime import datetime
 from typing import Optional
+from sqlalchemy import DateTime
 from sqlmodel import Field, SQLModel
+
+# 显式声明为“不带时区”的 DateTime，兼容新旧 SQLModel 版本
+_NAIVE_DATETIME = DateTime(timezone=False)
 
 
 class UserQnAStats(SQLModel, table=True):
@@ -17,8 +21,12 @@ class UserQnAStats(SQLModel, table=True):
     correct_count: int = Field(default=0, description="答对次数")
     wrong_count: int = Field(default=0, description="答错次数")
     tip_count: int = Field(default=0, description="提示次数")
-    created_at: datetime = Field(default_factory=datetime.now, description="创建时间")
-    updated_at: datetime = Field(default_factory=datetime.now, description="更新时间")
+    created_at: datetime = Field(
+        default_factory=datetime.now, sa_type=_NAIVE_DATETIME, description="创建时间"
+    )
+    updated_at: datetime = Field(
+        default_factory=datetime.now, sa_type=_NAIVE_DATETIME, description="更新时间"
+    )
 
 
 class Match(SQLModel, table=True):
@@ -33,9 +41,13 @@ class Match(SQLModel, table=True):
     is_active: bool = Field(default=True, description="是否进行中")
     question_limit: int = Field(default=0, description="答题数量限制(0不限制)")
     time_limit: int = Field(default=0, description="时间限制分钟(0不限制)")
-    created_at: datetime = Field(default_factory=datetime.now)
-    started_at: Optional[datetime] = Field(default=None, description="开始时间")
-    ended_at: Optional[datetime] = Field(default=None, description="结束时间")
+    created_at: datetime = Field(default_factory=datetime.now, sa_type=_NAIVE_DATETIME)
+    started_at: Optional[datetime] = Field(
+        default=None, sa_type=_NAIVE_DATETIME, description="开始时间"
+    )
+    ended_at: Optional[datetime] = Field(
+        default=None, sa_type=_NAIVE_DATETIME, description="结束时间"
+    )
 
 
 class MatchParticipant(SQLModel, table=True):
@@ -51,7 +63,7 @@ class MatchParticipant(SQLModel, table=True):
     correct_count: int = Field(default=0, description="答对数")
     wrong_count: int = Field(default=0, description="答错数")
     score: float = Field(default=0.0, description="得分(正确数-错误数*1/3)")
-    joined_at: datetime = Field(default_factory=datetime.now)
+    joined_at: datetime = Field(default_factory=datetime.now, sa_type=_NAIVE_DATETIME)
 
 
 class MatchHonor(SQLModel, table=True):
@@ -69,4 +81,4 @@ class MatchHonor(SQLModel, table=True):
     wrong_count: int = Field(default=0, description="答错数")
     score: float = Field(default=0.0, description="得分(正确数-错误数*1/3)")
     medal: str = Field(description="奖牌")
-    created_at: datetime = Field(default_factory=datetime.now)
+    created_at: datetime = Field(default_factory=datetime.now, sa_type=_NAIVE_DATETIME)
