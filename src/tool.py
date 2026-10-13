@@ -638,6 +638,14 @@ def resolve_command_names(
     return dedupe_command_names(names)
 
 
+# 去掉可能残留的唤醒前缀（如 "/"、"\"）。
+def strip_wake_prefix(message_str: str | None) -> str:
+    text = str(message_str or "").strip()
+    if text[:1] in ("/", "\\"):
+        return text.lstrip("/\\").lstrip()
+    return text
+
+
 # 去掉文本开头的指令名，返回其后的参数原文。
 def extract_argument_after_command(
     message_str: str,
@@ -649,7 +657,7 @@ def extract_argument_after_command(
         return None
     # 部分平台/场景下唤醒前缀（如 "/"）可能残留在 message_str 中，这里一并兼容
     candidates = [message]
-    stripped = message.lstrip("/\\").lstrip()
+    stripped = strip_wake_prefix(message)
     if stripped and stripped != message:
         candidates.append(stripped)
     # 长名称优先，避免短别名先把长指令名匹配掉
@@ -816,7 +824,9 @@ def normalize_compact_fc_command(
     message_str: str,
     command_names: Iterable[str] | None = None,
 ) -> str | None:
-    message = re.sub(r"\s+", " ", (message_str or "").strip())
+    # 部分平台/场景下唤醒前缀（如 "/"）可能残留在 message_str 中，需要先剥掉，
+    # 否则 "/猜能天使" 这类紧凑写法会被整串锚定匹配拒绝
+    message = re.sub(r"\s+", " ", strip_wake_prefix(message_str))
     if not message:
         return None
 
