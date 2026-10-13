@@ -223,3 +223,10 @@ pytest*
 .pytest-tmp-local/
 docs/
 test*
+
+# 本插件的回归测试需要纳入版本控制：上方 test*/pytest* 规则会一并忽略 tests/，
+# 这里显式放行（必须先放行目录本身，否则 git 不会进入该目录）
+!tests/
+!tests/**
+# 放行后需要重新排除的缓存（后面的规则优先级更高）
+tests/__pycache__/
