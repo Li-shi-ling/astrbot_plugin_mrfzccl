@@ -33,6 +33,7 @@ from .src.tool import (
     parse_aliases_json_text,
     resolve_command_names,
     normalize_compact_fc_command,
+    strip_wake_prefix,
 )
 from .src.db.repo import UserQnARepo, MatchRepo
 from .src.db.database import DBManager
@@ -524,16 +525,25 @@ class Mrfzccl(Star):
         group_id = str(group_id_raw) if is_group else None
         user_id = group_id if is_group else sender_id
 
-        # 紧凑指令写法（如重命名/别名后的「猜史尔特尔」）无法被静态正则过滤器
-        # 感知，这里按实际生效的指令名兜底识别。它属于「指令用法」，因此要求
-        # 唤醒（@ 或唤醒前缀）、且不受下方纯文本匹配开关影响；命中后复用
-        # /fcc 处理流程，保证锁与排行榜等语义一致。
+        # 指令用法兜底：静态过滤器无法感知重命名/别名（以及部分平台残留的
+        # "/"、"\" 唤醒前缀）时，按实际生效的指令名在这里识别，并复用 /fcc
+        # 处理流程，保证锁、排行榜等语义一致。属于「指令用法」，因此要求唤醒
+        # （@ 或唤醒前缀）、且不受下方纯文本匹配开关影响。
         if getattr(event, "is_at_or_wake_command", False) and has_active_game(
             self.player, user_id
         ):
-            normalized = normalize_compact_fc_command(
-                raw_message, resolve_command_names(self, "fcc", fallback="fcc")
-            )
+            names = resolve_command_names(self, "fcc", fallback="fcc")
+            # 紧凑写法（「猜史尔特尔」）：沿用 normalize 的长度/标点守卫，
+            # 避免把普通发言误当作指令参数
+            normalized = normalize_compact_fc_command(raw_message, names)
+            if normalized is None:
+                # 带空格写法（「/猜 能天使」）：残留唤醒前缀时 AstrBot 的指令
+                # 过滤器命中不了，这里兜底，语义与无前缀的指令写法保持一致
+                candidate = strip_wake_prefix(raw_message)
+                for name in sorted(names, key=len, reverse=True):
+                    if candidate.startswith(f"{name} "):
+                        normalized = candidate
+                        break
             if normalized:
                 original_message = event.message_str
                 event.message_str = normalized

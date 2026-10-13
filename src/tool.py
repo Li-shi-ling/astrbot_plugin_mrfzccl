@@ -609,6 +609,15 @@ def resolve_command_names(
     AstrBot 支持在 WebUI 里重命名指令或配置别名（记录在 CommandFilter 上），
     此时用户发送的 message_str 里是别名文本，写死原始指令名会解析不到参数。
     这里直接读取运行时注册表中该 handler 的 CommandFilter，拿到最新指令名。
+
+    ``fallback`` 会被**无条件**并入结果，这是有意的「兼容别名」设计：
+
+    * 上游 `fcregex` 过滤器按字面 ``^fcc\\S+$`` 匹配，重命名后仍有能力处理
+      ``fcc史尔特尔`` 这类紧凑写法，保留 ``fcc`` 可以让该行为延续；
+    * 同时把带空格写法（``fcc 能天使``）一并纳入兜底，避免同一个旧指令名
+      出现「有空格失效、无空格有效」的不一致。
+
+    若不希望保留原始指令名，可改为仅在运行时名称解析失败时才追加 fallback。
     """
     names: list[str] = [fallback] if fallback else []
     try:
