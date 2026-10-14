@@ -23,7 +23,7 @@ from ..tool import (
     generate_match_leaderboard_text,
     has_active_game,
     is_exact_operator_alias_match,
-    extract_and_sanitize_input,
+    extract_guess_text_from_event,
     resolve_alias,
     safe_cancel_task,
 )
@@ -181,11 +181,11 @@ async def handle_fcc(
             responses.append(event.plain_result("没有初始化房间,请使用/fc"))
         return responses, match_end_payload
 
-    # 提取并清理用户输入的猜测内容
+    # 提取并清理用户输入的猜测内容（兼容 AstrBot 面板里的指令重命名与别名）
     guess_text = (
         str(guess_text_override).strip()
         if guess_text_override is not None
-        else extract_and_sanitize_input(event.message_str, "fcc")
+        else extract_guess_text_from_event(self, event, "fcc")
     )
     if not guess_text:
         responses.append(

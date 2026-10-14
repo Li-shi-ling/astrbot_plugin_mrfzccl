@@ -26,11 +26,15 @@ from .src.rendering import (
 from .src.core.runtime import GameRuntime, MatchRuntime
 from .src.tool import (
     has_active_game,
+    is_plugin_handler_activated,
     load_operator_aliases,
     merge_alias_maps,
     parse_aliases,
     parse_aliases_json_text,
+    resolve_command_names,
+    command_handler_allows,
     normalize_compact_fc_command,
+    strip_wake_prefix,
 )
 from .src.db.repo import UserQnARepo, MatchRepo
 from .src.db.database import DBManager
@@ -49,7 +53,7 @@ import re
 
 
 # 注册插件，指定插件名、作者、描述和版本号
-@register("mrfzccl", "Lishining", "你知道的,我一直是明日方舟高手", "2.0.2")
+@register("mrfzccl", "Lishining", "你知道的,我一直是明日方舟高手", "2.0.3")
 class Mrfzccl(Star):
     _question_candidate_names: np.ndarray
     _question_candidate_urls: List[List[str]]
@@ -493,8 +497,13 @@ class Mrfzccl(Star):
         if not getattr(event, "is_at_or_wake_command", False):
             return
 
-        # 清理指令
-        normalized = normalize_compact_fc_command(event.message_str)
+        # 手动调用 /fcc 会跳过 AstrBot 的过滤器链，必须先校验启用状态与权限
+        if not command_handler_allows(self, event, "fcc"):
+            return
+
+        # 清理指令：按实际生效的指令名归一化，兼容重命名与别名
+        names = resolve_command_names(self, "fcc", fallback="fcc")
+        normalized = normalize_compact_fc_command(event.message_str, names)
         if not normalized:
             return
 
@@ -509,25 +518,72 @@ class Mrfzccl(Star):
     @filter.event_message_type(EventMessageType.ALL)
     async def other_fcc(self, event: AstrMessageEvent):
         """非fcc消息监听"""
-        if not getattr(self, "enable_other_message_exact_match", True):
+        # 指令名可能在面板里被重命名或配置了别名，此时消息文本不以 "fcc"
+        # 开头，需要按实际命中的 handler 判断，避免和 /fcc 指令重复判题。
+        if is_plugin_handler_activated(event, self, ("fcc", "fcregex")):
             return
 
         raw_message = str(event.message_str or "")
-        message = re.sub(r"\s+", " ", raw_message.strip())
-        if should_skip_plain_answer_message(
-            message, is_wake_command=getattr(event, "is_at_or_wake_command", False)
-        ):
-            return
-
         group_id_raw = event.get_group_id()
         sender_id = str(event.get_sender_id())
         is_group = bool(group_id_raw)
         group_id = str(group_id_raw) if is_group else None
         user_id = group_id if is_group else sender_id
 
+        # 指令用法兜底：静态过滤器无法感知重命名/别名（以及部分平台残留的
+        # "/"、"\\" 唤醒前缀）时，按实际生效的指令名在这里识别，并复用 /fcc
+        # 处理流程，保证锁、排行榜等语义一致。
+        #
+        # 关键：判断顺序是「先确认这是指令写法，再校验启用/权限」，一旦确认
+        # 属于指令写法却不被允许，就整条消息按未命中处理（不判题、也不回落到
+        # 纯文本路径），否则禁用 `/fcc` 或设为管理员指令后仍能靠别名写法绕过。
+        wake = getattr(event, "is_at_or_wake_command", False)
+        names = resolve_command_names(self, "fcc", fallback="fcc")
+        candidate = strip_wake_prefix(raw_message)
+
+        command_form = None
+        for name in sorted(names, key=len, reverse=True):
+            # 带空格写法（「猜 能天使」「/猜 能天使」）：与标准指令写法语义一致，
+            # 因此不要求存在进行中的游戏（无游戏时由 /fcc 流程给出提示）
+            if re.match(rf"{re.escape(name)}\s", candidate):
+                command_form = candidate
+                break
+        # 紧凑写法（「猜史尔特尔」）：沿用 normalize 的长度/标点守卫，并额外要求
+        # 游戏进行中，避免别名恰为常用词时把普通发言当成指令
+        if command_form is None and names and has_active_game(self.player, user_id):
+            command_form = normalize_compact_fc_command(raw_message, names)
+
+        if command_form is not None:
+            # 手动调用 self.fcc() 不会经过 AstrBot 的过滤器链，必须显式校验
+            if not command_handler_allows(self, event, "fcc"):
+                # 指令被面板禁用或当前用户权限不足：整条消息按未命中处理，
+                # 既不判题，也不回落到纯文本判题路径
+                return
+            if wake:
+                original_message = event.message_str
+                event.message_str = command_form
+                try:
+                    async for result in self.fcc(event):
+                        yield result
+                finally:
+                    event.message_str = original_message
+                return
+            # 未唤醒：不作为指令处理，继续走下方纯文本路径（保留既有能力）
+
+        if not getattr(self, "enable_other_message_exact_match", True):
+            return
+
+        message = re.sub(r"\s+", " ", raw_message.strip())
+        if should_skip_plain_answer_message(
+            message, is_wake_command=getattr(event, "is_at_or_wake_command", False)
+        ):
+            return
+
         if not has_active_game(self.player, user_id):
             return
 
+        # 锁前先按当前答案快照过滤：避免普通消息无谓抢占房间锁，也避免排队期间
+        # 题目已切换后被误判为下一题的答案。
         player_state = self.player.get(user_id)
         if not isinstance(player_state, dict):
             return
@@ -538,6 +594,14 @@ class Mrfzccl(Star):
 
         room_lock = self._get_match_lock(user_id)
         async with room_lock:
+            # 锁内复查：等待期间题目可能已被别人推进到下一题，此时必须丢弃这条
+            # 基于旧答案放行的消息，否则「包含多题答案」的消息会误判为下一题答案
+            current_state = self.player.get(user_id)
+            if (
+                not isinstance(current_state, dict)
+                or str(current_state.get("name") or "") != correct_name
+            ):
+                return
             responses, match_end_payload = await fc_handlers.handle_other_fcc(
                 self,
                 event,
