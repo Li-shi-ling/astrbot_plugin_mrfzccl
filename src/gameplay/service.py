@@ -75,8 +75,12 @@ class GuessGameService:
         return 1
 
     async def send_original_image(self, user_id: str, event: Any) -> Any:
+        # 注意：无论能否取到原图，答对后都必须结束当前游戏，否则房间会一直保持
+        # active：用户可以反复提交同一答案刷正确次数，且 /fc 会因“已经初始化”
+        # 无法重开、比赛也无法推进下一题。
         if user_id not in self.game_runtime.original_images:
             logger.warning(f"[Mrfzccl][send_original_image] 用户 {user_id} 没有原始图片")
+            self.game_runtime.end_game(user_id)
             return event.plain_result("无法获取正确答案图片")
 
         try:

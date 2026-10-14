@@ -597,6 +597,36 @@ def _handler_owner(handler: Any) -> Any:
     return getattr(handler, "__self__", None)
 
 
+# 定位属于该插件的指定 handler。
+def find_command_handler(plugin: Any, handler_name: str) -> Any | None:
+    """按方法名找到本插件的 handler 元数据（AstrBot 用 functools.partial 绑定 self）。
+
+    这里**不过滤**面板禁用状态：禁用后的指令名仍需要被识别出来，才能让
+    「指令写法」的消息整体按未命中处理，而不是回落到纯文本判题路径。
+    启用与权限校验统一由 command_handler_allows() 负责。
+    """
+    try:
+        from astrbot.core.star.star_handler import star_handlers_registry
+    except Exception as exc:  # 防御 AstrBot 内部结构变化
+        logger.debug(f"[Mrfzccl] 导入运行时注册表失败: {exc}")
+        return None
+
+    plugin_module = getattr(type(plugin), "__module__", "") if plugin else ""
+    for md in list(star_handlers_registry.star_handlers_map.values()):
+        if getattr(md, "handler_name", "") != handler_name:
+            continue
+        owner = _handler_owner(getattr(md, "handler", None))
+        if owner is not None:
+            if plugin is not None and owner is not plugin:
+                continue
+        elif plugin_module and getattr(md, "handler_module_path", "") != (
+            plugin_module
+        ):
+            continue
+        return md
+    return None
+
+
 # 读取指令在 AstrBot 中实际生效的全部名称（含面板重命名与别名）。
 def resolve_command_names(
     plugin: Any,
@@ -608,46 +638,73 @@ def resolve_command_names(
 
     AstrBot 支持在 WebUI 里重命名指令或配置别名（记录在 CommandFilter 上），
     此时用户发送的 message_str 里是别名文本，写死原始指令名会解析不到参数。
-    这里直接读取运行时注册表中该 handler 的 CommandFilter，拿到最新指令名。
 
-    ``fallback`` 会被**无条件**并入结果，这是有意的「兼容别名」设计：
-
-    * 上游 `fcregex` 过滤器按字面 ``^fcc\\S+$`` 匹配，重命名后仍有能力处理
-      ``fcc史尔特尔`` 这类紧凑写法，保留 ``fcc`` 可以让该行为延续；
-    * 同时把带空格写法（``fcc 能天使``）一并纳入兜底，避免同一个旧指令名
-      出现「有空格失效、无空格有效」的不一致。
-
-    若不希望保留原始指令名，可改为仅在运行时名称解析失败时才追加 fallback。
+    ``fallback`` **只在运行时名称解析失败时**（注册表不可用、尚未注册该 handler）
+    使用：它保证插件仍能按原指令名工作，而不会在指令被重命名后凭空多出一个
+    AstrBot 无法感知的“隐藏别名”（那会绕过 AstrBot 的冲突管理与禁用/权限设置）。
     """
-    names: list[str] = [fallback] if fallback else []
-    try:
-        from astrbot.core.star.filter.command import CommandFilter
-        from astrbot.core.star.star_handler import star_handlers_registry
-    except Exception as exc:  # 防御 AstrBot 内部结构变化
-        logger.debug(f"[Mrfzccl] 导入指令过滤器失败, 回退默认名称: {exc}")
-        return dedupe_command_names(names)
-
-    try:
-        plugin_module = getattr(type(plugin), "__module__", "") if plugin else ""
-        for md in list(star_handlers_registry.star_handlers_map.values()):
-            if getattr(md, "handler_name", "") != handler_name:
-                continue
-            owner = _handler_owner(getattr(md, "handler", None))
-            module_path = getattr(md, "handler_module_path", "")
-            if owner is not None:
-                if plugin is not None and owner is not plugin:
-                    continue
-            elif plugin_module and module_path != plugin_module:
-                continue
+    names: list[str] = []
+    md = find_command_handler(plugin, handler_name)
+    if md is not None:
+        try:
+            from astrbot.core.star.filter.command import CommandFilter
+        except Exception as exc:
+            logger.debug(f"[Mrfzccl] 导入指令过滤器失败: {exc}")
+        else:
             for flt in getattr(md, "event_filters", None) or []:
                 if isinstance(flt, CommandFilter):
                     names.extend(flt.get_complete_command_names())
+
+    names = dedupe_command_names(names)
+    if not names and fallback:
+        names = dedupe_command_names([fallback])
+    return names
+
+
+# 手动调用指令前，补齐 waking stage 会执行的过滤器检查。
+def command_handler_allows(
+    plugin: Any,
+    event: AstrMessageEvent,
+    handler_name: str,
+    *,
+    cfg: Any = None,
+) -> bool:
+    """校验该指令 handler 上除指令名匹配以外的过滤器（权限、平台等）。
+
+    `fcregex` / `other_fcc` 是直接调用 `self.fcc()` 的，不会经过 AstrBot 的
+    过滤器链；若不显式校验，面板里把 `/fcc` 禁用或设为管理员指令后，
+    用户仍能通过紧凑/别名写法绕过，属于权限策略绕过。
+    """
+    md = find_command_handler(plugin, handler_name)
+    if md is None:
+        return False
+    if not getattr(md, "enabled", True):
+        # 面板中已禁用该指令
+        return False
+
+    try:
+        from astrbot.core.star.filter.command import CommandFilter
+        from astrbot.core.star.filter.command_group import CommandGroupFilter
     except Exception as exc:
-        logger.debug(f"[Mrfzccl] 解析指令名称失败, 回退默认名称: {exc}")
-    return dedupe_command_names(names)
+        logger.debug(f"[Mrfzccl] 导入过滤器类型失败: {exc}")
+        CommandFilter = CommandGroupFilter = ()  # type: ignore[assignment]
+
+    for flt in getattr(md, "event_filters", None) or []:
+        # 指令名匹配由调用方负责，其余过滤器逐个执行
+        if CommandFilter and isinstance(flt, CommandFilter):
+            continue
+        if CommandGroupFilter and isinstance(flt, CommandGroupFilter):
+            continue
+        try:
+            if not flt.filter(event, cfg if cfg is not None else {}):
+                return False
+        except Exception as exc:
+            logger.debug(f"[Mrfzccl] 指令过滤器校验失败({handler_name}): {exc}")
+            return False
+    return True
 
 
-# 去掉可能残留的唤醒前缀（如 "/"、"\"）。
+# 去掉可能残留的唤醒前缀（如 "/"、"\\"）。
 def strip_wake_prefix(message_str: str | None) -> str:
     text = str(message_str or "").strip()
     if text[:1] in ("/", "\\"):
