@@ -74,16 +74,17 @@ def test_wrong_answer_is_counted_once(harness, command_name, aliases):
 # 4. 重命名后原始指令名 = 兼容别名（两种写法行为一致）
 # --------------------------------------------------------------------------
 @pytest.mark.parametrize("text", ["fcc 能天使", "fcc能天使"])
-def test_original_name_kept_as_compat_alias_after_rename(harness, text):
-    """重命名后 ``fcc`` 仍作为兼容别名可用，且带空格/紧凑行为一致。
+def test_renamed_away_name_is_not_a_hidden_alias(harness, text):
+    """指令被重命名后，旧指令名不再是 AstrBot 无法感知的「隐藏别名」。
 
-    这是 `resolve_command_names(fallback=...)` 的**有意**设计：上游 `fcregex`
-    本就按字面 ``fcc`` 匹配，保留它可以避免同一旧指令名出现「有空格失效、
-    无空格有效」的不一致。若不希望保留，去掉调用处的 fallback 即可。
+    `resolve_command_names(fallback=...)` 只在运行时名称解析失败时使用 fallback；
+    否则会出现：管理员把 `fcc` 重命名后 AstrBot 认为该名称已释放（可被其它插件
+    注册），本插件却仍会处理 `fcc ...`，造成重复响应且绕过冲突/权限管理。
     """
     harness.set_command("猜", ())
     case = harness.run(text)
-    assert case.correct == 1, f"{text!r} 兼容别名应可用: {case.texts}"
+    assert case.texts == [], f"{text!r} 重命名后不应再响应: {case.texts}"
+    assert (case.correct_delta, case.wrong_delta) == (0, 0)
 
 
 def test_renamed_command_still_supports_aliases(harness):
@@ -100,7 +101,7 @@ def test_renamed_command_still_supports_aliases(harness):
 def test_no_duplicate_judging(harness):
     """同一条指令消息不得既被指令处理、又被纯文本监听重复判题。"""
     harness.set_command("猜", ())
-    for text in ("猜 能天使", "猜能天使", "fcc 能天使", "fcc能天使"):
+    for text in ("猜 能天使", "猜能天使", "/猜 能天使", "/猜能天使"):
         case = harness.run(text)
         assert case.correct + case.wrong == 1, f"{text!r} 只应判题一次: {case.texts}"
         assert case.correct_delta + case.wrong_delta == 1
@@ -206,3 +207,115 @@ def test_pure_helpers(tool_module):
     assert tool.normalize_compact_fc_command("猜 能天使", names) is None  # 带空格不属紧凑
     assert tool.normalize_compact_fc_command("fcc" + "啊" * 20, names) is None  # 超长
     assert tool.normalize_compact_fc_command("fcc能天使，", names) is None  # 含标点
+
+# --------------------------------------------------------------------------
+# 10. 权限 / 禁用状态不得被兜底路径绕过
+# --------------------------------------------------------------------------
+@pytest.mark.parametrize("text", ["fcc能天使", "猜 能天使", "猜能天使", "/猜 能天使"])
+def test_disabled_command_is_not_judged(harness, text):
+    """面板中禁用 /fcc 后，任何写法都不得再判题（含 fcregex 与别名兜底）。"""
+    harness.set_command("猜", ("猜",))
+    md = harness.command_handler("fcc")
+    md.enabled = False
+    try:
+        case = harness.run(text)
+        assert case.texts == [], f"禁用后不应判题: {text!r} -> {case.texts}"
+        assert (case.correct_delta, case.wrong_delta) == (0, 0)
+    finally:
+        md.enabled = True
+
+
+def test_admin_only_command_blocks_member(harness):
+    """把 /fcc 设为管理员指令后，普通成员不得通过别名/紧凑写法绕过。"""
+    from astrbot.core.star.filter.permission import PermissionType, PermissionTypeFilter
+
+    harness.set_command("猜", ())
+    md = harness.command_handler("fcc")
+    md.event_filters.append(PermissionTypeFilter(PermissionType.ADMIN))
+    try:
+        for text in ("猜 能天使", "猜能天使", "fcc能天使"):
+            case = harness.run(text, role="member")
+            assert case.texts == [], f"普通成员不应判题: {text!r} -> {case.texts}"
+            assert (case.correct_delta, case.wrong_delta) == (0, 0)
+        # 管理员仍可用
+        case = harness.run("猜 能天使", role="admin")
+        assert case.correct == 1, f"管理员应可判题: {case.texts}"
+    finally:
+        md.event_filters = [
+            f for f in md.event_filters if not isinstance(f, PermissionTypeFilter)
+        ]
+
+
+# --------------------------------------------------------------------------
+# 11. 原图缺失必须结束当前游戏（否则可重复刷正确次数）
+# --------------------------------------------------------------------------
+def test_missing_original_image_ends_game(harness):
+    """有游戏但原图缓存丢失时，答对后仍必须结束房间，不能重复计分。"""
+    harness.set_command("fcc", ())
+    room = "no-image-room"
+    first = harness.run("fcc 能天使", sender=room, image=False)
+    assert first.correct == 1
+    assert first.correct_delta == 1
+    assert first.joined.count("无法获取正确答案图片") == 1
+    # 房间必须已被清理，否则可以用同一答案继续刷分、/fc 也无法重开
+    assert not harness.plugin.player.get(room), "答对后房间应已结束"
+    assert not harness.plugin.original_images.get(room)
+    # 再次提交同一答案（不重新注入状态）：房间已结束，不应再计分
+    second = harness.run("fcc 能天使", sender=room, image=False, seed=False)
+    assert second.correct_delta == 0, "房间未结束会导致重复计分"
+    assert "没有初始化房间" in second.joined
+
+
+# --------------------------------------------------------------------------
+# 12. 并发切题：基于旧答案放行的消息必须被丢弃
+# --------------------------------------------------------------------------
+def test_stale_snapshot_message_is_dropped(harness):
+    """锁内复查答案快照：等待锁期间题目切换后，旧事件不得被判为下一题答案。"""
+    harness.set_command("fcc", ())
+    plugin = harness.plugin
+    uid = "stale-1"
+    plugin.player[uid] = {"name": ANSWER, "status": "active"}
+    from PIL import Image
+
+    plugin.original_images[uid] = Image.new("RGB", (16, 16))
+
+    real_lock = plugin._get_match_lock
+    room_lock = real_lock(uid)
+
+    class RacingLock:
+        """进入临界区前把题目推进到下一题，模拟排队期间被切题。"""
+
+        async def __aenter__(self):
+            await room_lock.__aenter__()
+            plugin.player[uid]["name"] = OTHER
+            return self
+
+        async def __aexit__(self, *exc):
+            return await room_lock.__aexit__(*exc)
+
+    plugin._get_match_lock = lambda room_id: RacingLock()
+    try:
+        # 消息同时包含旧答案与下一题答案
+        case = harness.run(f"{ANSWER}{OTHER}", sender=uid)
+        assert case.correct == 0, f"旧事件不应被判为下一题答案: {case.texts}"
+        assert (case.correct_delta, case.wrong_delta) == (0, 0)
+    finally:
+        plugin._get_match_lock = real_lock
+
+
+# --------------------------------------------------------------------------
+# 13. 残留前缀下「带空格写法」与标准指令行为一致
+# --------------------------------------------------------------------------
+def test_retained_prefix_spaced_uses_standard_semantics(harness):
+    """无进行中的游戏时，`/猜 能天使` 应像标准指令那样提示未初始化房间。"""
+    harness.set_command("猜", ())
+    case = harness.run("/猜 能天使", active_game=False)
+    assert "没有初始化房间" in case.joined, f"应提示未初始化房间: {case.texts}"
+
+
+@pytest.mark.parametrize("sep", ["\t", "\u3000"])
+def test_whitespace_separated_forms_are_judged(harness, sep):
+    """用制表符/全角空格分隔时也应识别为指令写法。"""
+    harness.set_command("猜", ())
+    case = harness.run(f"猜{sep}{ANSWER}")
+    assert case.correct == 1, f"空白分隔应判题: {case.texts}"

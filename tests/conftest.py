@@ -14,8 +14,8 @@ import asyncio
 import functools
 import importlib
 import importlib.util
-import os
 import inspect
+import os
 import pathlib
 import sys
 import types
@@ -84,10 +84,11 @@ def plugin(tmp_path_factory, loop):
 class FakeEvent:
     """尽量贴近 AstrMessageEvent 对外契约（get_extra 为真实签名）。"""
 
-    def __init__(self, text, sender="10001", group=None, wake=True):
+    def __init__(self, text, sender="10001", group=None, wake=True, role="member"):
         self.message_str = text
         self._sender = str(sender)
         self._group = group
+        self.role = role
         self.is_at_or_wake_command = wake
         self.unified_msg_origin = (
             f"aiocqhttp:group:{group}" if group else f"aiocqhttp:private:{sender}"
@@ -105,6 +106,9 @@ class FakeEvent:
 
     def get_message_str(self):
         return self.message_str
+
+    def is_admin(self):
+        return self.role == "admin"
 
     def get_message_type(self):
         from astrbot.core.platform.message_type import MessageType
@@ -166,6 +170,13 @@ class Harness:
         flt.alias = set(aliases or ())
         flt._cmpl_cmd_names = None
 
+    def command_handler(self, name: str = "fcc"):
+        """取到已绑定的指令 handler 元数据，便于测试里模拟禁用/加权限过滤器。"""
+        for md in self._activated_pool():
+            if md.handler_name == name:
+                return md
+        raise AssertionError(f"未找到 handler: {name}")
+
     # ---------- 事件派发 ----------
     def _handler(self, name: str):
         for md in self._activated_pool():
@@ -176,7 +187,12 @@ class Harness:
     def _activated_pool(self):
         import astrbot.core.star.star_handler as sh
 
-        return sh.star_handlers_registry.get_handlers_by_module_name(MODULE_PATH)
+        # 与生产一致：面板中禁用的 handler 不会进入事件派发
+        return [
+            md
+            for md in sh.star_handlers_registry.get_handlers_by_module_name(MODULE_PATH)
+            if md.enabled
+        ]
 
     def activate(self, event) -> list:
         """用真实 filter 复现 waking_check 的激活判定。"""
@@ -218,20 +234,28 @@ class Harness:
         answer="能天使",
         active_game=True,
         image=True,
+        role="member",
+        seed=True,
     ) -> Case:
+        """派发一条消息并返回结果。
+
+        seed=False 表示**不重新注入**游戏状态，用于验证「答对后房间是否真的结束」
+        这类需要连续两次派发同一房间的场景。
+        """
         self._n += 1
         uid = sender or f"u{self._n}"
         room = group if group is not None else uid
-        if active_game:
-            self.plugin.player[room] = {"name": answer, "status": "active"}
-        else:
-            self.plugin.player.pop(room, None)
-        if image:
-            from PIL import Image
+        if seed:
+            if active_game:
+                self.plugin.player[room] = {"name": answer, "status": "active"}
+            else:
+                self.plugin.player.pop(room, None)
+            if image:
+                from PIL import Image
 
-            self.plugin.original_images[room] = Image.new("RGB", (32, 32))
-        else:
-            self.plugin.original_images.pop(room, None)
+                self.plugin.original_images[room] = Image.new("RGB", (32, 32))
+            else:
+                self.plugin.original_images.pop(room, None)
         async def _scenario():
             before = await self.plugin.user_qna_repo.get_user_stats(uid)
             calls = {"n": 0}
@@ -243,7 +267,9 @@ class Harness:
 
             self.plugin._get_match_lock = spy
             try:
-                event = FakeEvent(text, sender=uid, group=group, wake=wake)
+                event = FakeEvent(
+                    text, sender=uid, group=group, wake=wake, role=role
+                )
                 self.activate(event)
                 results = await self._dispatch(event)
             finally:
